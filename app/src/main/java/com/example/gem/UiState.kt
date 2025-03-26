@@ -18,7 +18,10 @@ sealed interface UiState {
     /**
      * Text has been generated
      */
-    data class Success(val outputText: String) : UiState
+    data class Success(
+        val outputText: String,
+        val selectedWords: List<String>
+    ) : UiState
 
     /**
      * There was an error generating text
