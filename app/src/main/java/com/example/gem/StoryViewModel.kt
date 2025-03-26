@@ -2,11 +2,9 @@ package com.example.gem
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +18,7 @@ class StoryViewModel : ViewModel() {
 
     private var textToSpeech: TextToSpeech? = null
     private var isSpeaking = false
+    private var isRussian = false
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-1.5-flash",
@@ -40,27 +39,45 @@ class StoryViewModel : ViewModel() {
         // Выбираем 4 случайных слова
         val selectedWords = words.toList().shuffled().take(4)
         
-        val prompt = """
-            Create a short story using these words: ${selectedWords.joinToString(", ")}.
-            Additional context from user: $userPrompt
-            
-            Requirements:
-            1. The story should be 3-4 paragraphs long
-            2. Each selected word must be used at least once
-            3. The story should be engaging and creative
-            4. Make sure the story flows naturally and the words are used in context
-        """.trimIndent()
+        val prompt = if (!isRussian) {
+            """
+                Create a short story using these words: ${selectedWords.joinToString(", ")}.
+                Additional context from user: $userPrompt
+                
+                Requirements:
+                1. The story should be 3-4 paragraphs long
+                2. Each selected word must be used at least once
+                3. The story should be engaging and creative
+                4. Make sure the story flows naturally and the words are used in context
+            """.trimIndent()
+        } else {
+            """
+                Создай короткую историю, используя эти слова: ${selectedWords.joinToString(", ")}.
+                Дополнительный контекст от пользователя: $userPrompt
+                
+                Требования:
+                1. История должна быть длиной 3-4 абзаца
+                2. Каждое выбранное слово должно быть использовано хотя бы раз
+                3. История должна быть увлекательной и креативной
+                4. Убедись, что история течет естественно и слова используются в контексте
+            """.trimIndent()
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val response = generativeModel.generateContent(prompt)
                 response.text?.let { outputContent ->
-                    _uiState.value = UiState.Success(outputContent, selectedWords)
+                    _uiState.value = UiState.Success(outputContent, selectedWords, isRussian)
                 }
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.localizedMessage ?: "Failed to generate story")
             }
         }
+    }
+
+    fun toggleLanguage(currentPrompt: String) {
+        isRussian = !isRussian
+        generateStory(currentPrompt)
     }
 
     fun speakText(text: String) {
@@ -72,9 +89,11 @@ class StoryViewModel : ViewModel() {
         isSpeaking = !isSpeaking
     }
 
-    fun getWordInfo(word: String): Pair<String, String> {
-        // Здесь можно добавить реальный API для получения транскрипции и перевода
-        // Пока используем заглушку
+    fun speakWord(word: String) {
+        textToSpeech?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_utterance")
+    }
+
+    fun getWordInfo(word: String): Triple<String, String, String> {
         val transcription = when (word.lowercase()) {
             "adventure" -> "[ədˈventʃə]"
             "mystery" -> "[ˈmɪstəri]"
@@ -102,8 +121,22 @@ class StoryViewModel : ViewModel() {
             "ocean" -> "Океан"
             else -> "Перевод не найден"
         }
+
+        val example = when (word.lowercase()) {
+            "adventure" -> "Going on an adventure in the mountains."
+            "mystery" -> "The mystery of the ancient tomb."
+            "rainbow" -> "A beautiful rainbow after the rain."
+            "dragon" -> "The dragon breathed fire."
+            "treasure" -> "Finding pirate's treasure."
+            "magic" -> "Performing magic tricks."
+            "journey" -> "A long journey home."
+            "forest" -> "Walking through the dark forest."
+            "castle" -> "Living in a medieval castle."
+            "ocean" -> "Swimming in the deep ocean."
+            else -> "Example not found"
+        }
         
-        return Pair(transcription, translation)
+        return Triple(transcription, translation, example)
     }
 
     override fun onCleared() {

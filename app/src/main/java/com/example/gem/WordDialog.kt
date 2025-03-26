@@ -1,15 +1,13 @@
 package com.example.gem
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -17,11 +15,27 @@ fun WordDialog(
     word: String,
     transcription: String,
     translation: String,
-    onDismiss: () -> Unit
+    example: String,
+    onDismiss: () -> Unit,
+    onSpeak: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(word) },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(word)
+                IconButton(onClick = onSpeak) {
+                    Icon(
+                        imageVector = Icons.Outlined.VolumeUp,
+                        contentDescription = "Pronounce word"
+                    )
+                }
+            }
+        },
         text = {
             Column(
                 modifier = Modifier.padding(vertical = 8.dp)
@@ -33,7 +47,17 @@ fun WordDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = translation,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Example:",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Text(
+                    text = example,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic
                 )
             }
         },

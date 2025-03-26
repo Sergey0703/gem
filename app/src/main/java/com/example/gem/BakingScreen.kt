@@ -3,14 +3,12 @@ package com.example.gem
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,27 +66,44 @@ fun StoryScreen(
         )
 
         Row(
-            modifier = Modifier.padding(all = 16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             TextField(
                 value = prompt,
                 onValueChange = { newValue -> prompt = newValue },
                 label = { Text(stringResource(R.string.label_prompt)) },
                 modifier = Modifier
-                    .weight(0.8f)
-                    .padding(end = 16.dp)
-                    .align(Alignment.CenterVertically)
+                    .weight(1f)
+                    .padding(end = 8.dp)
             )
 
-            Button(
-                onClick = {
-                    storyViewModel.generateStory(prompt)
-                },
-                enabled = prompt.isNotEmpty(),
-                modifier = Modifier
-                    .align(Alignment.CenterVertically)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(text = stringResource(R.string.action_go))
+                // Кнопка переключения языка
+                IconButton(
+                    onClick = { 
+                        storyViewModel.toggleLanguage(prompt)
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Language,
+                        contentDescription = "Toggle language"
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        storyViewModel.generateStory(prompt)
+                    },
+                    enabled = prompt.isNotEmpty()
+                ) {
+                    Text(text = stringResource(R.string.action_go))
+                }
             }
         }
 
@@ -117,7 +132,7 @@ fun StoryScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            text = "Selected words:",
+                            text = if (!successState.isRussian) "Selected words:" else "Выбранные слова:",
                             style = MaterialTheme.typography.titleSmall
                         )
                         Row(
@@ -153,16 +168,18 @@ fun StoryScreen(
                         var foundWord = false
                         for (word in successState.selectedWords) {
                             if (text.startsWith(word, currentIndex, ignoreCase = true)) {
-                                append(text.substring(currentIndex, currentIndex + word.length))
+                                val start = currentIndex
+                                val end = currentIndex + word.length
+                                append(text.substring(start, end))
                                 addStyle(
                                     SpanStyle(
                                         background = MaterialTheme.colorScheme.primaryContainer,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer
                                     ),
-                                    currentIndex,
-                                    currentIndex + word.length
+                                    start,
+                                    end
                                 )
-                                currentIndex += word.length
+                                currentIndex = end
                                 foundWord = true
                                 break
                             }
@@ -182,13 +199,16 @@ fun StoryScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Story text:",
+                        text = if (!successState.isRussian) "Story text:" else "Текст истории:",
                         style = MaterialTheme.typography.titleSmall
                     )
-                    TextButton(
+                    IconButton(
                         onClick = { storyViewModel.speakText(successState.outputText) }
                     ) {
-                        Text("🔊")
+                        Icon(
+                            imageVector = Icons.Outlined.VolumeUp,
+                            contentDescription = "Speak text"
+                        )
                     }
                 }
                 
@@ -197,9 +217,8 @@ fun StoryScreen(
                     textAlign = TextAlign.Start,
                     color = textColor,
                     modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
+                        .fillMaxWidth()
                         .padding(16.dp)
-                        .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 )
             } else {
@@ -208,9 +227,8 @@ fun StoryScreen(
                     textAlign = TextAlign.Start,
                     color = textColor,
                     modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
+                        .fillMaxWidth()
                         .padding(16.dp)
-                        .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 )
             }
@@ -224,9 +242,13 @@ fun StoryScreen(
             word = selectedWord!!,
             transcription = wordInfo.first,
             translation = wordInfo.second,
+            example = wordInfo.third,
             onDismiss = {
                 showWordDialog = false
                 selectedWord = null
+            },
+            onSpeak = {
+                storyViewModel.speakWord(selectedWord!!)
             }
         )
     }

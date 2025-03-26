@@ -20,7 +20,8 @@ sealed interface UiState {
      */
     data class Success(
         val outputText: String,
-        val selectedWords: List<String>
+        val selectedWords: List<String>,
+        val isRussian: Boolean
     ) : UiState
 
     /**
