@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Language
@@ -17,9 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -159,38 +162,6 @@ fun StoryScreen(
                     }
                 }
                 
-                // Создаем текст с выделенными словами
-                val highlightedText = buildAnnotatedString {
-                    val text = successState.outputText
-                    var currentIndex = 0
-                    
-                    while (currentIndex < text.length) {
-                        var foundWord = false
-                        for (word in successState.selectedWords) {
-                            if (text.startsWith(word, currentIndex, ignoreCase = true)) {
-                                val start = currentIndex
-                                val end = currentIndex + word.length
-                                append(text.substring(start, end))
-                                addStyle(
-                                    SpanStyle(
-                                        background = MaterialTheme.colorScheme.primaryContainer,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    ),
-                                    start,
-                                    end
-                                )
-                                currentIndex = end
-                                foundWord = true
-                                break
-                            }
-                        }
-                        if (!foundWord) {
-                            append(text[currentIndex])
-                            currentIndex++
-                        }
-                    }
-                }
-                
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -211,16 +182,75 @@ fun StoryScreen(
                         )
                     }
                 }
-                
-                Text(
-                    text = highlightedText,
-                    textAlign = TextAlign.Start,
-                    color = textColor,
+
+                // Создаем текст с кликабельными словами
+                val annotatedText = buildAnnotatedString {
+                    val text = successState.outputText
+                    var currentIndex = 0
+                    val words = text.split(Regex("(?<=\\s)|(?=\\s)")) // Разделяем текст, сохраняя пробелы
+
+                    words.forEach { part ->
+                        if (part.isBlank()) {
+                            append(part)
+                            currentIndex += part.length
+                        } else {
+                            val isHighlighted = successState.selectedWords.any { 
+                                part.contains(it, ignoreCase = true) 
+                            }
+                            
+                            if (isHighlighted) {
+                                withStyle(
+                                    SpanStyle(
+                                        background = MaterialTheme.colorScheme.primaryContainer,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                ) {
+                                    append(part)
+                                }
+                            } else {
+                                append(part)
+                            }
+                            
+                            addStringAnnotation(
+                                tag = "word",
+                                annotation = part,
+                                start = currentIndex,
+                                end = currentIndex + part.length
+                            )
+                            currentIndex += part.length
+                        }
+                    }
+                }
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
-                        .verticalScroll(rememberScrollState())
-                )
+                ) {
+                    ClickableText(
+                        text = annotatedText,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            color = textColor,
+                            textAlign = TextAlign.Justify
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                        onClick = { offset ->
+                            annotatedText.getStringAnnotations(
+                                tag = "word",
+                                start = offset,
+                                end = offset
+                            ).firstOrNull()?.let { annotation ->
+                                val word = annotation.item.trim('.',',','!','?','"','\'',';',':','(',')','[',']','{','}')
+                                if (word.isNotBlank()) {
+                                    selectedWord = word
+                                    showWordDialog = true
+                                }
+                            }
+                        }
+                    )
+                }
             } else {
                 Text(
                     text = result,
@@ -237,9 +267,10 @@ fun StoryScreen(
 
     // Показываем диалог с информацией о слове
     if (showWordDialog && selectedWord != null) {
-        val wordInfo = storyViewModel.getWordInfo(selectedWord!!)
+        val cleanWord = selectedWord!!.trim('.',',','!','?','"','\'',';',':','(',')','[',']','{','}')
+        val wordInfo = storyViewModel.getWordInfo(cleanWord)
         WordDialog(
-            word = selectedWord!!,
+            word = cleanWord,
             transcription = wordInfo.first,
             translation = wordInfo.second,
             example = wordInfo.third,
@@ -248,7 +279,7 @@ fun StoryScreen(
                 selectedWord = null
             },
             onSpeak = {
-                storyViewModel.speakWord(selectedWord!!)
+                storyViewModel.speakWord(cleanWord)
             }
         )
     }

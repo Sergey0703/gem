@@ -41,25 +41,51 @@ class StoryViewModel : ViewModel() {
         
         val prompt = if (!isRussian) {
             """
-                Create a short story using these words: ${selectedWords.joinToString(", ")}.
+                Create a bilingual story (English and Russian) using these words: ${selectedWords.joinToString(", ")}.
                 Additional context from user: $userPrompt
                 
                 Requirements:
-                1. The story should be 3-4 paragraphs long
-                2. Each selected word must be used at least once
-                3. The story should be engaging and creative
-                4. Make sure the story flows naturally and the words are used in context
+                1. First, provide translations for all the selected words in this format:
+                   Word: [English word] - [Russian translation] - [Transcription]
+                2. Then create a story that is 3-4 paragraphs long
+                3. Provide the story in both English and Russian (paragraph by paragraph)
+                4. Each selected word must be used at least once
+                5. The story should be engaging and creative
+                6. Make sure the story flows naturally and the words are used in context
+                
+                Format the response like this:
+                TRANSLATIONS:
+                [word translations as specified above]
+                
+                ENGLISH STORY:
+                [English version of the story]
+                
+                RUSSIAN STORY:
+                [Russian version of the story]
             """.trimIndent()
         } else {
             """
-                Создай короткую историю, используя эти слова: ${selectedWords.joinToString(", ")}.
+                Создай двуязычную историю (на русском и английском) используя эти слова: ${selectedWords.joinToString(", ")}.
                 Дополнительный контекст от пользователя: $userPrompt
                 
                 Требования:
-                1. История должна быть длиной 3-4 абзаца
-                2. Каждое выбранное слово должно быть использовано хотя бы раз
-                3. История должна быть увлекательной и креативной
-                4. Убедись, что история течет естественно и слова используются в контексте
+                1. Сначала предоставь переводы всех выбранных слов в таком формате:
+                   Слово: [Английское слово] - [Русский перевод] - [Транскрипция]
+                2. Затем создай историю длиной 3-4 абзаца
+                3. Предоставь историю на обоих языках (абзац за абзацем)
+                4. Каждое выбранное слово должно быть использовано хотя бы раз
+                5. История должна быть увлекательной и креативной
+                6. Убедись, что история течет естественно и слова используются в контексте
+                
+                Форматируй ответ так:
+                ПЕРЕВОДЫ:
+                [переводы слов как указано выше]
+                
+                АНГЛИЙСКАЯ ВЕРСИЯ:
+                [История на английском]
+                
+                РУССКАЯ ВЕРСИЯ:
+                [История на русском]
             """.trimIndent()
         }
 
@@ -67,7 +93,34 @@ class StoryViewModel : ViewModel() {
             try {
                 val response = generativeModel.generateContent(prompt)
                 response.text?.let { outputContent ->
-                    _uiState.value = UiState.Success(outputContent, selectedWords, isRussian)
+                    // Разбираем ответ на секции по маркерам
+                    val translationsStart = outputContent.indexOf("TRANSLATIONS:")
+                    val englishStart = outputContent.indexOf("ENGLISH STORY:")
+                    val russianStart = outputContent.indexOf("RUSSIAN STORY:")
+                    
+                    val translations = outputContent.substring(
+                        translationsStart,
+                        englishStart
+                    ).trim()
+                    
+                    val englishStory = outputContent.substring(
+                        englishStart,
+                        russianStart
+                    ).replace("ENGLISH STORY:", "").trim()
+                    
+                    val russianStory = outputContent.substring(
+                        russianStart
+                    ).replace("RUSSIAN STORY:", "").trim()
+                    
+                    // Сохраняем все версии текста
+                    _uiState.value = UiState.Success(
+                        outputText = englishStory, // Показываем изначально английскую версию
+                        selectedWords = selectedWords,
+                        isRussian = isRussian,
+                        translations = translations,
+                        englishVersion = englishStory,
+                        russianVersion = russianStory
+                    )
                 }
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.localizedMessage ?: "Failed to generate story")
@@ -76,8 +129,20 @@ class StoryViewModel : ViewModel() {
     }
 
     fun toggleLanguage(currentPrompt: String) {
-        isRussian = !isRussian
-        generateStory(currentPrompt)
+        val currentState = _uiState.value
+        if (currentState is UiState.Success) {
+            isRussian = !isRussian
+            
+            // Просто переключаем между сохраненными версиями
+            _uiState.value = currentState.copy(
+                outputText = if (isRussian) currentState.russianVersion else currentState.englishVersion,
+                isRussian = isRussian
+            )
+        } else {
+            // Если еще нет сгенерированного текста, генерируем новый
+            isRussian = !isRussian
+            generateStory(currentPrompt)
+        }
     }
 
     fun speakText(text: String) {
@@ -94,6 +159,22 @@ class StoryViewModel : ViewModel() {
     }
 
     fun getWordInfo(word: String): Triple<String, String, String> {
+        // Получаем текущее состояние
+        val currentState = _uiState.value
+        
+        // Если у нас есть переводы от Gemini
+        if (currentState is UiState.Success && currentState.translations.isNotEmpty()) {
+            // Ищем перевод слова в переводах от Gemini
+            val wordPattern = "(?i)Word: $word - ([^-]+) - \\[([^\\]]+)\\]".toRegex()
+            val match = wordPattern.find(currentState.translations)
+            
+            if (match != null) {
+                val (translation, transcription) = match.destructured
+                return Triple("[$transcription]", translation.trim(), "Example not found")
+            }
+        }
+        
+        // Если перевод не найден в Gemini, используем предопределенные переводы
         val transcription = when (word.lowercase()) {
             "adventure" -> "[ədˈventʃə]"
             "mystery" -> "[ˈmɪstəri]"
