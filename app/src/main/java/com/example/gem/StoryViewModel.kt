@@ -52,6 +52,7 @@ class StoryViewModel : ViewModel() {
                 4. Each selected word must be used at least once
                 5. The story should be engaging and creative
                 6. Make sure the story flows naturally and the words are used in context
+                7. After the story, provide a vocabulary list of ALL words used in the story (not just the selected ones)
                 
                 Format the response like this:
                 TRANSLATIONS:
@@ -62,6 +63,9 @@ class StoryViewModel : ViewModel() {
                 
                 RUSSIAN STORY:
                 [Russian version of the story]
+                
+                VOCABULARY:
+                [List all unique words from the story in format: English word - Russian translation - [transcription]]
             """.trimIndent()
         } else {
             """
@@ -76,6 +80,7 @@ class StoryViewModel : ViewModel() {
                 4. Каждое выбранное слово должно быть использовано хотя бы раз
                 5. История должна быть увлекательной и креативной
                 6. Убедись, что история течет естественно и слова используются в контексте
+                7. После истории предоставь словарь ВСЕХ использованных слов (не только выбранных)
                 
                 Форматируй ответ так:
                 ПЕРЕВОДЫ:
@@ -86,6 +91,9 @@ class StoryViewModel : ViewModel() {
                 
                 РУССКАЯ ВЕРСИЯ:
                 [История на русском]
+                
+                СЛОВАРЬ:
+                [Список всех уникальных слов из истории в формате: Английское слово - Русский перевод - [транскрипция]]
             """.trimIndent()
         }
 
@@ -97,6 +105,7 @@ class StoryViewModel : ViewModel() {
                     val translationsStart = outputContent.indexOf("TRANSLATIONS:")
                     val englishStart = outputContent.indexOf("ENGLISH STORY:")
                     val russianStart = outputContent.indexOf("RUSSIAN STORY:")
+                    val vocabularyStart = outputContent.indexOf(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:")
                     
                     val translations = outputContent.substring(
                         translationsStart,
@@ -109,15 +118,27 @@ class StoryViewModel : ViewModel() {
                     ).replace("ENGLISH STORY:", "").trim()
                     
                     val russianStory = outputContent.substring(
-                        russianStart
+                        russianStart,
+                        vocabularyStart
                     ).replace("RUSSIAN STORY:", "").trim()
+                    
+                    val vocabulary = outputContent.substring(
+                        vocabularyStart
+                    ).replace(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:", "").trim()
+                    
+                    // Объединяем переводы выбранных слов и словарь
+                    val allTranslations = """
+                        $translations
+                        
+                        $vocabulary
+                    """.trimIndent()
                     
                     // Сохраняем все версии текста
                     _uiState.value = UiState.Success(
                         outputText = englishStory, // Показываем изначально английскую версию
                         selectedWords = selectedWords,
                         isRussian = isRussian,
-                        translations = translations,
+                        translations = allTranslations,
                         englishVersion = englishStory,
                         russianVersion = russianStory
                     )
@@ -163,61 +184,66 @@ class StoryViewModel : ViewModel() {
         val currentState = _uiState.value
         
         // Если у нас есть переводы от Gemini
-        if (currentState is UiState.Success && currentState.translations.isNotEmpty()) {
-            // Ищем перевод слова в переводах от Gemini
-            val wordPattern = "(?i)Word: $word - ([^-]+) - \\[([^\\]]+)\\]".toRegex()
+        if (currentState is UiState.Success) {
+            // Ищем слово в общем списке переводов (включая словарь)
+            // Если текст на русском, ищем русское слово для получения английского перевода
+            val wordPattern = if (isRussian) {
+                // Ищем формат "английское - русское" где русское слово совпадает с нашим
+                "(?i)([\\w\\s]+) - $word - \\[([^\\]]+)\\]".toRegex()
+            } else {
+                // Ищем формат "слово - перевод" где слово совпадает с нашим
+                "(?i)(?:Word: )?$word - ([^-]+) - \\[([^\\]]+)\\]".toRegex()
+            }
+            
             val match = wordPattern.find(currentState.translations)
             
             if (match != null) {
-                val (translation, transcription) = match.destructured
-                return Triple("[$transcription]", translation.trim(), "Example not found")
+                if (isRussian) {
+                    // Если текст на русском, то первая группа - английское слово, вторая - транскрипция
+                    val (englishWord, transcription) = match.destructured
+                    return Triple("[$transcription]", englishWord.trim(), "")
+                } else {
+                    // Если текст на английском, то первая группа - русский перевод, вторая - транскрипция
+                    val (translation, transcription) = match.destructured
+                    return Triple("[$transcription]", translation.trim(), "")
+                }
             }
         }
         
         // Если перевод не найден в Gemini, используем предопределенные переводы
-        val transcription = when (word.lowercase()) {
-            "adventure" -> "[ədˈventʃə]"
-            "mystery" -> "[ˈmɪstəri]"
-            "rainbow" -> "[ˈreɪnbəʊ]"
-            "dragon" -> "[ˈdræɡən]"
-            "treasure" -> "[ˈtreʒə]"
-            "magic" -> "[ˈmædʒɪk]"
-            "journey" -> "[ˈdʒɜːni]"
-            "forest" -> "[ˈfɒrɪst]"
-            "castle" -> "[ˈkɑːsl]"
-            "ocean" -> "[ˈəʊʃn]"
-            else -> "[$word]"
+        val (transcription, translation) = if (isRussian) {
+            // Если текст на русском, ищем английский эквивалент
+            when (word.lowercase()) {
+                "приключение" -> Pair("[ədˈventʃə]", "adventure")
+                "тайна" -> Pair("[ˈmɪstəri]", "mystery")
+                "радуга" -> Pair("[ˈreɪnbəʊ]", "rainbow")
+                "дракон" -> Pair("[ˈdræɡən]", "dragon")
+                "сокровище" -> Pair("[ˈtreʒə]", "treasure")
+                "магия" -> Pair("[ˈmædʒɪk]", "magic")
+                "путешествие" -> Pair("[ˈdʒɜːni]", "journey")
+                "лес" -> Pair("[ˈfɒrɪst]", "forest")
+                "замок" -> Pair("[ˈkɑːsl]", "castle")
+                "океан" -> Pair("[ˈəʊʃn]", "ocean")
+                else -> Pair("[$word]", "Translation not found")
+            }
+        } else {
+            // Если текст на английском, ищем русский перевод
+            when (word.lowercase()) {
+                "adventure" -> Pair("[ədˈventʃə]", "Приключение")
+                "mystery" -> Pair("[ˈmɪstəri]", "Тайна")
+                "rainbow" -> Pair("[ˈreɪnbəʊ]", "Радуга")
+                "dragon" -> Pair("[ˈdræɡən]", "Дракон")
+                "treasure" -> Pair("[ˈtreʒə]", "Сокровище")
+                "magic" -> Pair("[ˈmædʒɪk]", "Магия")
+                "journey" -> Pair("[ˈdʒɜːni]", "Путешествие")
+                "forest" -> Pair("[ˈfɒrɪst]", "Лес")
+                "castle" -> Pair("[ˈkɑːsl]", "Замок")
+                "ocean" -> Pair("[ˈəʊʃn]", "Океан")
+                else -> Pair("[$word]", "Перевод не найден")
+            }
         }
         
-        val translation = when (word.lowercase()) {
-            "adventure" -> "Приключение"
-            "mystery" -> "Тайна"
-            "rainbow" -> "Радуга"
-            "dragon" -> "Дракон"
-            "treasure" -> "Сокровище"
-            "magic" -> "Магия"
-            "journey" -> "Путешествие"
-            "forest" -> "Лес"
-            "castle" -> "Замок"
-            "ocean" -> "Океан"
-            else -> "Перевод не найден"
-        }
-
-        val example = when (word.lowercase()) {
-            "adventure" -> "Going on an adventure in the mountains."
-            "mystery" -> "The mystery of the ancient tomb."
-            "rainbow" -> "A beautiful rainbow after the rain."
-            "dragon" -> "The dragon breathed fire."
-            "treasure" -> "Finding pirate's treasure."
-            "magic" -> "Performing magic tricks."
-            "journey" -> "A long journey home."
-            "forest" -> "Walking through the dark forest."
-            "castle" -> "Living in a medieval castle."
-            "ocean" -> "Swimming in the deep ocean."
-            else -> "Example not found"
-        }
-        
-        return Triple(transcription, translation, example)
+        return Triple(transcription, translation, "")
     }
 
     override fun onCleared() {

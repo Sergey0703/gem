@@ -49,16 +49,6 @@ fun WordDialog(
                     text = translation,
                     style = MaterialTheme.typography.bodyLarge
                 )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Example:",
-                    style = MaterialTheme.typography.labelMedium
-                )
-                Text(
-                    text = example,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontStyle = FontStyle.Italic
-                )
             }
         },
         confirmButton = {
