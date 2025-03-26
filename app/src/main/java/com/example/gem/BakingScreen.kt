@@ -116,7 +116,7 @@ fun StoryScreen(
             var textColor = MaterialTheme.colorScheme.onSurface
             if (uiState is UiState.Error) {
                 textColor = MaterialTheme.colorScheme.error
-                result = (uiState as UiState.Error).errorMessage
+                result = (uiState as UiState.Error).message
             } else if (uiState is UiState.Success) {
                 textColor = MaterialTheme.colorScheme.onSurface
                 val successState = uiState as UiState.Success
@@ -173,13 +173,64 @@ fun StoryScreen(
                         text = if (!successState.isRussian) "Story text:" else "Текст истории:",
                         style = MaterialTheme.typography.titleSmall
                     )
-                    IconButton(
-                        onClick = { storyViewModel.speakText(successState.outputText) }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.VolumeUp,
-                            contentDescription = "Speak text"
-                        )
+                        // Слайдер скорости речи
+                        var speechRate by remember { mutableStateOf(1f) }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "0.5x",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = speechRate,
+                                onValueChange = { 
+                                    speechRate = it
+                                    storyViewModel.setSpeechRate(it)
+                                },
+                                valueRange = 0.5f..2f,
+                                modifier = Modifier.width(100.dp)
+                            )
+                            Text(
+                                text = "2x",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        
+                        // Кнопка для чтения по предложениям с выделением
+                        IconButton(
+                            onClick = {
+                                storyViewModel.speakText(context, successState.outputText)
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.VolumeUp,
+                                contentDescription = if (!successState.isRussian) 
+                                    "Read by sentences" 
+                                else 
+                                    "Читать по предложениям"
+                            )
+                        }
+                        
+                        // Кнопка для плавного чтения
+                        FilledTonalIconButton(
+                            onClick = {
+                                storyViewModel.speakTextSmooth(context, successState.outputText)
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.VolumeUp,
+                                contentDescription = if (!successState.isRussian) 
+                                    "Read smoothly" 
+                                else 
+                                    "Плавное чтение"
+                            )
+                        }
                     }
                 }
 
@@ -187,37 +238,67 @@ fun StoryScreen(
                 val annotatedText = buildAnnotatedString {
                     val text = successState.outputText
                     var currentIndex = 0
-                    val words = text.split(Regex("(?<=\\s)|(?=\\s)")) // Разделяем текст, сохраняя пробелы
-
-                    words.forEach { part ->
-                        if (part.isBlank()) {
-                            append(part)
-                            currentIndex += part.length
-                        } else {
-                            val isHighlighted = successState.selectedWords.any { 
-                                part.contains(it, ignoreCase = true) 
-                            }
-                            
-                            if (isHighlighted) {
+                    
+                    // Разбиваем текст на предложения
+                    val sentences = text.split(Regex("(?<=[.!?])\\s+"))
+                        .filter { it.isNotBlank() }
+                        .map { it.trim() }
+                    
+                    // Для каждого предложения
+                    sentences.forEachIndexed { index, sentence ->
+                        // Проверяем, является ли это предложение текущим произносимым
+                        val isCurrentlySpeaking = successState.currentSpokenWord == sentence
+                        
+                        // Разбиваем предложение на слова для обработки кликабельности
+                        val words = sentence.split(Regex("\\s+"))
+                        
+                        // Применяем стиль ко всему предложению
+                        withStyle(
+                            SpanStyle(
+                                background = if (isCurrentlySpeaking) 
+                                    Color(0xFFFFEB3B).copy(alpha = 0.3f)
+                                else 
+                                    Color.Transparent
+                            )
+                        ) {
+                            words.forEachIndexed { wordIndex, word ->
+                                val isHighlighted = successState.selectedWords.any { 
+                                    word.contains(it, ignoreCase = true) 
+                                }
+                                
+                                // Применяем стиль к слову
                                 withStyle(
                                     SpanStyle(
-                                        background = MaterialTheme.colorScheme.primaryContainer,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (isHighlighted)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            textColor
                                     )
                                 ) {
-                                    append(part)
+                                    append(word)
+                                    
+                                    // Добавляем аннотацию для кликабельности
+                                    addStringAnnotation(
+                                        tag = "word",
+                                        annotation = word,
+                                        start = currentIndex,
+                                        end = currentIndex + word.length
+                                    )
+                                    currentIndex += word.length
                                 }
-                            } else {
-                                append(part)
+                                
+                                // Добавляем пробел после слова, если это не последнее слово
+                                if (wordIndex < words.size - 1) {
+                                    append(" ")
+                                    currentIndex += 1
+                                }
                             }
                             
-                            addStringAnnotation(
-                                tag = "word",
-                                annotation = part,
-                                start = currentIndex,
-                                end = currentIndex + part.length
-                            )
-                            currentIndex += part.length
+                            // Добавляем пробел после предложения, если это не последнее предложение
+                            if (index < sentences.size - 1) {
+                                append(" ")
+                                currentIndex += 1
+                            }
                         }
                     }
                 }
@@ -242,11 +323,10 @@ fun StoryScreen(
                                 start = offset,
                                 end = offset
                             ).firstOrNull()?.let { annotation ->
-                                val word = annotation.item.trim('.',',','!','?','"','\'',';',':','(',')','[',']','{','}')
-                                if (word.isNotBlank()) {
-                                    selectedWord = word
-                                    showWordDialog = true
-                                }
+                                storyViewModel.speakWord(context, annotation.item)
+                                val wordInfo = storyViewModel.getWordInfo(annotation.item)
+                                selectedWord = annotation.item
+                                showWordDialog = true
                             }
                         }
                     )
@@ -279,7 +359,7 @@ fun StoryScreen(
                 selectedWord = null
             },
             onSpeak = {
-                storyViewModel.speakWord(cleanWord)
+                storyViewModel.speakWord(context, cleanWord)
             }
         )
     }

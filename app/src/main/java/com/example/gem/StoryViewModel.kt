@@ -2,6 +2,7 @@ package com.example.gem
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
@@ -16,19 +17,87 @@ class StoryViewModel : ViewModel() {
     private val _uiState: MutableStateFlow<UiState> = MutableStateFlow(UiState.Initial)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    private var textToSpeech: TextToSpeech? = null
+    private var tts: TextToSpeech? = null
     private var isSpeaking = false
     private var isRussian = false
+    private var currentSentenceIndex = 0
+    private var sentences = listOf<String>()
+    private var speechRate = 1.0f
+
+    // Добавляем предопределенный список слов
+    private val availableWords = listOf(
+        "adventure",
+        "mystery",
+        "rainbow",
+        "dragon",
+        "treasure",
+        "magic",
+        "journey",
+        "forest",
+        "castle",
+        "ocean"
+    )
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-1.5-flash",
         apiKey = BuildConfig.apiKey
     )
 
+    fun setSpeechRate(rate: Float) {
+        speechRate = rate
+        tts?.setSpeechRate(rate)
+    }
+
     fun initializeTTS(context: Context) {
-        textToSpeech = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                textToSpeech?.language = Locale.US
+        if (tts == null) {
+            try {
+                tts = TextToSpeech(context) { status ->
+                    if (status == TextToSpeech.SUCCESS) {
+                        tts?.language = Locale.US
+                        tts?.setSpeechRate(speechRate)
+                        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String) {
+                                viewModelScope.launch {
+                                    if (utteranceId.startsWith("sentence_") && currentSentenceIndex < sentences.size) {
+                                        _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                                            currentSpokenWord = sentences[currentSentenceIndex]
+                                        ) ?: _uiState.value
+                                    }
+                                }
+                            }
+
+                            override fun onDone(utteranceId: String) {
+                                if (utteranceId.startsWith("sentence_") && isSpeaking && currentSentenceIndex < sentences.size - 1) {
+                                    currentSentenceIndex++
+                                    speakNextSentence()
+                                } else {
+                                    isSpeaking = false
+                                    currentSentenceIndex = 0
+                                    viewModelScope.launch {
+                                        _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                                            currentSpokenWord = ""
+                                        ) ?: _uiState.value
+                                    }
+                                }
+                            }
+
+                            override fun onError(utteranceId: String) {
+                                isSpeaking = false
+                                currentSentenceIndex = 0
+                                viewModelScope.launch {
+                                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                                        currentSpokenWord = ""
+                                    ) ?: _uiState.value
+                                }
+                            }
+                        })
+                    } else {
+                        // Обработка ошибки инициализации TTS
+                        _uiState.value = UiState.Error("Failed to initialize text-to-speech")
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.value = UiState.Error("Error initializing text-to-speech: ${e.localizedMessage}")
             }
         }
     }
@@ -36,8 +105,8 @@ class StoryViewModel : ViewModel() {
     fun generateStory(userPrompt: String) {
         _uiState.value = UiState.Loading
 
-        // Выбираем 4 случайных слова
-        val selectedWords = words.toList().shuffled().take(4)
+        // Выбираем 4 случайных слова из доступного списка
+        val selectedWords = availableWords.shuffled().take(4)
         
         val prompt = if (!isRussian) {
             """
@@ -107,24 +176,32 @@ class StoryViewModel : ViewModel() {
                     val russianStart = outputContent.indexOf("RUSSIAN STORY:")
                     val vocabularyStart = outputContent.indexOf(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:")
                     
-                    val translations = outputContent.substring(
-                        translationsStart,
-                        englishStart
-                    ).trim()
+                    val translations = if (translationsStart >= 0 && englishStart > translationsStart) {
+                        outputContent.substring(translationsStart, englishStart).trim()
+                    } else {
+                        ""
+                    }
                     
-                    val englishStory = outputContent.substring(
-                        englishStart,
-                        russianStart
-                    ).replace("ENGLISH STORY:", "").trim()
+                    val englishStory = if (englishStart >= 0 && russianStart > englishStart) {
+                        outputContent.substring(englishStart, russianStart)
+                            .replace("ENGLISH STORY:", "").trim()
+                    } else {
+                        ""
+                    }
                     
-                    val russianStory = outputContent.substring(
-                        russianStart,
-                        vocabularyStart
-                    ).replace("RUSSIAN STORY:", "").trim()
+                    val russianStory = if (russianStart >= 0 && vocabularyStart > russianStart) {
+                        outputContent.substring(russianStart, vocabularyStart)
+                            .replace("RUSSIAN STORY:", "").trim()
+                    } else {
+                        ""
+                    }
                     
-                    val vocabulary = outputContent.substring(
-                        vocabularyStart
-                    ).replace(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:", "").trim()
+                    val vocabulary = if (vocabularyStart >= 0) {
+                        outputContent.substring(vocabularyStart)
+                            .replace(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:", "").trim()
+                    } else {
+                        ""
+                    }
                     
                     // Объединяем переводы выбранных слов и словарь
                     val allTranslations = """
@@ -149,34 +226,89 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    fun toggleLanguage(currentPrompt: String) {
-        val currentState = _uiState.value
-        if (currentState is UiState.Success) {
-            isRussian = !isRussian
+    fun toggleLanguage(prompt: String) {
+        try {
+            stopSpeaking() // Останавливаем воспроизведение при переключении языка
             
-            // Просто переключаем между сохраненными версиями
-            _uiState.value = currentState.copy(
-                outputText = if (isRussian) currentState.russianVersion else currentState.englishVersion,
-                isRussian = isRussian
-            )
-        } else {
-            // Если еще нет сгенерированного текста, генерируем новый
-            isRussian = !isRussian
-            generateStory(currentPrompt)
+            val currentState = _uiState.value
+            if (currentState is UiState.Success) {
+                isRussian = !isRussian
+                if (isRussian && currentState.russianVersion.isNotEmpty()) {
+                    _uiState.value = currentState.copy(
+                        outputText = currentState.russianVersion,
+                        isRussian = true
+                    )
+                } else if (!isRussian && currentState.englishVersion.isNotEmpty()) {
+                    _uiState.value = currentState.copy(
+                        outputText = currentState.englishVersion,
+                        isRussian = false
+                    )
+                } else {
+                    generateStory(prompt)
+                }
+            }
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error toggling language: ${e.localizedMessage}")
         }
     }
 
-    fun speakText(text: String) {
-        if (isSpeaking) {
-            textToSpeech?.stop()
-        } else {
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "story_utterance")
+    fun speakText(context: Context, text: String) {
+        try {
+            initializeTTS(context)
+            
+            if (isSpeaking) {
+                stopSpeaking()
+                return
+            }
+
+            if (text.isBlank()) {
+                return
+            }
+
+            sentences = text.split(Regex("(?<=[.!?])\\s+"))
+                .filter { it.isNotBlank() }
+                .map { it.trim() }
+
+            if (sentences.isNotEmpty()) {
+                isSpeaking = true
+                currentSentenceIndex = 0
+                speakNextSentence()
+            }
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
         }
-        isSpeaking = !isSpeaking
     }
 
-    fun speakWord(word: String) {
-        textToSpeech?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_utterance")
+    private fun speakNextSentence() {
+        try {
+            if (currentSentenceIndex < sentences.size) {
+                val sentence = sentences[currentSentenceIndex]
+                tts?.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
+            }
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error speaking sentence: ${e.localizedMessage}")
+        }
+    }
+
+    fun speakWord(context: Context, word: String) {
+        initializeTTS(context)
+        stopSpeaking()
+        tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "single_word")
+    }
+
+    private fun stopSpeaking() {
+        try {
+            tts?.stop()
+            isSpeaking = false
+            currentSentenceIndex = 0
+            viewModelScope.launch {
+                _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                    currentSpokenWord = ""
+                ) ?: _uiState.value
+            }
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error stopping speech: ${e.localizedMessage}")
+        }
     }
 
     fun getWordInfo(word: String): Triple<String, String, String> {
@@ -246,10 +378,34 @@ class StoryViewModel : ViewModel() {
         return Triple(transcription, translation, "")
     }
 
+    fun speakTextSmooth(context: Context, text: String) {
+        try {
+            initializeTTS(context)
+            
+            if (isSpeaking) {
+                stopSpeaking()
+                return
+            }
+
+            if (text.isBlank()) {
+                return
+            }
+
+            isSpeaking = true
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
+        }
+    }
+
     override fun onCleared() {
+        try {
+            stopSpeaking()
+            tts?.shutdown()
+            tts = null
+        } catch (e: Exception) {
+            // Игнорируем ошибки при закрытии
+        }
         super.onCleared()
-        textToSpeech?.stop()
-        textToSpeech?.shutdown()
-        textToSpeech = null
     }
 } 
