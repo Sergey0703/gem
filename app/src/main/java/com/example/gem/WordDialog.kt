@@ -2,7 +2,7 @@ package com.example.gem
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -27,28 +27,47 @@ fun WordDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(word)
+                Text(
+                    text = word,
+                    style = MaterialTheme.typography.titleLarge
+                )
                 IconButton(onClick = onSpeak) {
                     Icon(
-                        imageVector = Icons.Outlined.VolumeUp,
-                        contentDescription = "Pronounce word"
+                        imageVector = Icons.Filled.VolumeUp,
+                        contentDescription = "Pronounce"
                     )
                 }
             }
         },
         text = {
             Column(
-                modifier = Modifier.padding(vertical = 8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     text = transcription,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = translation,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary
                 )
+                if (example.isNotEmpty() && example != "Error getting example") {
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        text = "Example:",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = example,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             }
         },
         confirmButton = {

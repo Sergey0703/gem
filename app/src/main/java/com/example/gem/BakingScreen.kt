@@ -1,6 +1,7 @@
 package com.example.gem
 
 import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,8 +9,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,6 +27,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 
 val words = arrayOf(
     "adventure",
@@ -53,6 +62,8 @@ fun StoryScreen(
     
     var selectedWord by remember { mutableStateOf<String?>(null) }
     var showWordDialog by remember { mutableStateOf(false) }
+    var showSelectedWords by remember { mutableStateOf(false) }
+    var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
 
     // Инициализация TextToSpeech
     LaunchedEffect(Unit) {
@@ -87,259 +98,189 @@ fun StoryScreen(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Кнопка переключения языка
                 IconButton(
-                    onClick = { 
-                        storyViewModel.toggleLanguage(prompt)
-                    }
+                    onClick = { storyViewModel.toggleLanguage() }
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Language,
+                        imageVector = Icons.Filled.Language,
                         contentDescription = "Toggle language"
                     )
                 }
 
                 Button(
-                    onClick = {
-                        storyViewModel.generateStory(prompt)
-                    },
-                    enabled = prompt.isNotEmpty()
+                    onClick = { storyViewModel.startStoryGeneration(prompt) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
                 ) {
-                    Text(text = stringResource(R.string.action_go))
+                    Text("Generate")
                 }
             }
         }
 
-        if (uiState is UiState.Loading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-        } else {
-            var textColor = MaterialTheme.colorScheme.onSurface
-            if (uiState is UiState.Error) {
-                textColor = MaterialTheme.colorScheme.error
-                result = (uiState as UiState.Error).message
-            } else if (uiState is UiState.Success) {
-                textColor = MaterialTheme.colorScheme.onSurface
-                val successState = uiState as UiState.Success
-                result = successState.outputText
-                
-                // Показываем выбранные слова
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = if (!successState.isRussian) "Selected words:" else "Выбранные слова:",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Row(
-                            modifier = Modifier.padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            successState.selectedWords.forEach { word ->
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = MaterialTheme.shapes.small,
-                                    modifier = Modifier.clickable {
-                                        selectedWord = word
-                                        showWordDialog = true
-                                    }
-                                ) {
-                                    Text(
-                                        text = word,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (!successState.isRussian) "Story text:" else "Текст истории:",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Слайдер скорости речи
-                        var speechRate by remember { mutableStateOf(1f) }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "0.5x",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                            Slider(
-                                value = speechRate,
-                                onValueChange = { 
-                                    speechRate = it
-                                    storyViewModel.setSpeechRate(it)
-                                },
-                                valueRange = 0.5f..2f,
-                                modifier = Modifier.width(100.dp)
-                            )
-                            Text(
-                                text = "2x",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                        
-                        // Кнопка для чтения по предложениям с выделением
-                        IconButton(
-                            onClick = {
-                                storyViewModel.speakText(context, successState.outputText)
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.VolumeUp,
-                                contentDescription = if (!successState.isRussian) 
-                                    "Read by sentences" 
-                                else 
-                                    "Читать по предложениям"
-                            )
-                        }
-                        
-                        // Кнопка для плавного чтения
-                        FilledTonalIconButton(
-                            onClick = {
-                                storyViewModel.speakTextSmooth(context, successState.outputText)
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.VolumeUp,
-                                contentDescription = if (!successState.isRussian) 
-                                    "Read smoothly" 
-                                else 
-                                    "Плавное чтение"
-                            )
-                        }
-                    }
-                }
-
-                // Создаем текст с кликабельными словами
-                val annotatedText = buildAnnotatedString {
-                    val text = successState.outputText
-                    var currentIndex = 0
-                    
-                    // Разбиваем текст на предложения
-                    val sentences = text.split(Regex("(?<=[.!?])\\s+"))
-                        .filter { it.isNotBlank() }
-                        .map { it.trim() }
-                    
-                    // Для каждого предложения
-                    sentences.forEachIndexed { index, sentence ->
-                        // Проверяем, является ли это предложение текущим произносимым
-                        val isCurrentlySpeaking = successState.currentSpokenWord == sentence
-                        
-                        // Разбиваем предложение на слова для обработки кликабельности
-                        val words = sentence.split(Regex("\\s+"))
-                        
-                        // Применяем стиль ко всему предложению
-                        withStyle(
-                            SpanStyle(
-                                background = if (isCurrentlySpeaking) 
-                                    Color(0xFFFFEB3B).copy(alpha = 0.3f)
-                                else 
-                                    Color.Transparent
-                            )
-                        ) {
-                            words.forEachIndexed { wordIndex, word ->
-                                val isHighlighted = successState.selectedWords.any { 
-                                    word.contains(it, ignoreCase = true) 
-                                }
-                                
-                                // Применяем стиль к слову
-                                withStyle(
-                                    SpanStyle(
-                                        color = if (isHighlighted)
-                                            MaterialTheme.colorScheme.primary
-                                        else
-                                            textColor
-                                    )
-                                ) {
-                                    append(word)
-                                    
-                                    // Добавляем аннотацию для кликабельности
-                                    addStringAnnotation(
-                                        tag = "word",
-                                        annotation = word,
-                                        start = currentIndex,
-                                        end = currentIndex + word.length
-                                    )
-                                    currentIndex += word.length
-                                }
-                                
-                                // Добавляем пробел после слова, если это не последнее слово
-                                if (wordIndex < words.size - 1) {
-                                    append(" ")
-                                    currentIndex += 1
-                                }
-                            }
-                            
-                            // Добавляем пробел после предложения, если это не последнее предложение
-                            if (index < sentences.size - 1) {
-                                append(" ")
-                                currentIndex += 1
-                            }
-                        }
-                    }
-                }
-
+        when (val state = uiState) {
+            is UiState.Loading -> {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    ClickableText(
-                        text = annotatedText,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            color = textColor,
-                            textAlign = TextAlign.Justify
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState()),
-                        onClick = { offset ->
-                            annotatedText.getStringAnnotations(
-                                tag = "word",
-                                start = offset,
-                                end = offset
-                            ).firstOrNull()?.let { annotation ->
-                                storyViewModel.speakWord(context, annotation.item)
-                                val wordInfo = storyViewModel.getWordInfo(annotation.item)
-                                selectedWord = annotation.item
-                                showWordDialog = true
-                            }
-                        }
-                    )
+                    CircularProgressIndicator()
                 }
-            } else {
-                Text(
-                    text = result,
-                    textAlign = TextAlign.Start,
-                    color = textColor,
+            }
+            is UiState.Success -> {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxSize()
                         .padding(16.dp)
                         .verticalScroll(rememberScrollState())
+                ) {
+                    // Single card for both story and words
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (showSelectedWords) {
+                                        if (!state.isRussian) "Selected words:" else "Выбранные слова:"
+                                    } else {
+                                        if (!state.isRussian) "Story:" else "История:"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    TextButton(
+                                        onClick = { showSelectedWords = !showSelectedWords }
+                                    ) {
+                                        Text(if (showSelectedWords) "Show story" else "Show words")
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            storyViewModel.speakText(
+                                                context,
+                                                if (state.isRussian) state.russianVersion else state.englishVersion
+                                            )
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.VolumeUp,
+                                            contentDescription = "Read text"
+                                        )
+                                    }
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = !showSelectedWords,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                ) {
+                                    val text = if (state.isRussian) state.russianVersion else state.englishVersion
+                                    val annotatedText = buildAnnotatedString {
+                                        var currentIndex = 0
+                                        val pattern = Regex("""\*\*([^*]+)\*\*|\*([^*]+)\*""")
+                                        
+                                        pattern.findAll(text).forEach { matchResult ->
+                                            // Add text before the match
+                                            append(text.substring(currentIndex, matchResult.range.first))
+                                            
+                                            // Get the word without asterisks
+                                            val word = matchResult.groupValues[1].ifEmpty { matchResult.groupValues[2] }
+                                            
+                                            // Add the word with special style
+                                            withStyle(
+                                                style = SpanStyle(
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            ) {
+                                                append(word)
+                                            }
+                                            
+                                            currentIndex = matchResult.range.last + 1
+                                        }
+                                        
+                                        // Add remaining text
+                                        if (currentIndex < text.length) {
+                                            append(text.substring(currentIndex))
+                                        }
+                                    }
+                                    
+                                    Text(
+                                        text = annotatedText,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp)
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = showSelectedWords,
+                                enter = fadeIn(),
+                                exit = fadeOut()
+                            ) {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Adaptive(minSize = 100.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(top = 8.dp)
+                                ) {
+                                    items(state.selectedWords) { word ->
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            shape = MaterialTheme.shapes.small,
+                                            modifier = Modifier.clickable {
+                                                selectedWord = word
+                                                storyViewModel.getWordInfoAndUpdate(word) { (transcription, translation, example) ->
+                                                    wordInfo = Triple(transcription, translation, example)
+                                                    showWordDialog = true
+                                                }
+                                            }
+                                        ) {
+                                            Text(
+                                                text = word,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            is UiState.Error -> {
+                Text(
+                    text = state.message,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+            else -> {
+                Text(
+                    text = "Enter your prompt and press Generate",
+                    modifier = Modifier.padding(16.dp)
                 )
             }
         }
@@ -347,10 +288,8 @@ fun StoryScreen(
 
     // Показываем диалог с информацией о слове
     if (showWordDialog && selectedWord != null) {
-        val cleanWord = selectedWord!!.trim('.',',','!','?','"','\'',';',':','(',')','[',']','{','}')
-        val wordInfo = storyViewModel.getWordInfo(cleanWord)
         WordDialog(
-            word = cleanWord,
+            word = selectedWord!!,
             transcription = wordInfo.first,
             translation = wordInfo.second,
             example = wordInfo.third,
@@ -359,7 +298,7 @@ fun StoryScreen(
                 selectedWord = null
             },
             onSpeak = {
-                storyViewModel.speakWord(context, cleanWord)
+                storyViewModel.speakWord(context, selectedWord!!)
             }
         )
     }

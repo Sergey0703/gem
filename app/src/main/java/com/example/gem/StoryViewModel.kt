@@ -3,17 +3,21 @@ package com.example.gem
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.*
+import kotlinx.coroutines.withContext
 
 class StoryViewModel : ViewModel() {
+    private val TAG = "StoryViewModel"
     private val _uiState: MutableStateFlow<UiState> = MutableStateFlow(UiState.Initial)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -24,23 +28,47 @@ class StoryViewModel : ViewModel() {
     private var sentences = listOf<String>()
     private var speechRate = 1.0f
 
-    // Добавляем предопределенный список слов
+    // Список из 300 слов для генерации истории
     private val availableWords = listOf(
-        "adventure",
-        "mystery",
-        "rainbow",
-        "dragon",
-        "treasure",
-        "magic",
-        "journey",
-        "forest",
-        "castle",
-        "ocean"
+        "adventure", "mystery", "rainbow", "dragon", "treasure", "magic", "journey", "forest", "castle", "ocean",
+        "mountain", "river", "desert", "island", "beach", "cave", "bridge", "tower", "garden", "park",
+        "city", "village", "house", "school", "library", "museum", "shop", "market", "restaurant", "cafe",
+        "book", "pen", "paper", "map", "key", "door", "window", "chair", "table", "lamp",
+        "clock", "phone", "computer", "camera", "radio", "television", "music", "song", "dance", "art",
+        "color", "red", "blue", "green", "yellow", "purple", "orange", "pink", "brown", "black",
+        "white", "gray", "gold", "silver", "bronze", "stone", "wood", "metal", "glass", "plastic",
+        "flower", "tree", "grass", "leaf", "branch", "root", "seed", "fruit", "vegetable", "food",
+        "water", "fire", "earth", "air", "sun", "moon", "star", "cloud", "rain", "snow",
+        "wind", "storm", "thunder", "lightning", "fog", "mist", "ice", "frost", "dew", "steam",
+        "bird", "fish", "cat", "dog", "horse", "lion", "tiger", "bear", "wolf", "fox",
+        "rabbit", "deer", "elephant", "giraffe", "zebra", "monkey", "penguin", "owl", "eagle", "swan",
+        "butterfly", "bee", "ant", "spider", "snake", "frog", "turtle", "crab", "shark", "whale",
+        "person", "child", "parent", "friend", "teacher", "doctor", "artist", "writer", "singer", "dancer",
+        "king", "queen", "prince", "princess", "knight", "wizard", "witch", "giant", "dwarf", "elf",
+        "time", "day", "night", "morning", "evening", "spring", "summer", "autumn", "winter", "week",
+        "month", "year", "hour", "minute", "second", "today", "tomorrow", "yesterday", "now", "later",
+        "happy", "sad", "angry", "scared", "excited", "tired", "sleepy", "hungry", "thirsty", "cold",
+        "hot", "warm", "cool", "wet", "dry", "clean", "dirty", "new", "old", "young",
+        "big", "small", "tall", "short", "long", "wide", "narrow", "heavy", "light", "fast",
+        "slow", "loud", "quiet", "bright", "dark", "sweet", "sour", "salty", "spicy", "fresh",
+        "walk", "run", "jump", "swim", "fly", "climb", "dance", "sing", "talk", "laugh",
+        "cry", "smile", "frown", "wave", "nod", "shake", "point", "touch", "feel", "see",
+        "hear", "smell", "taste", "think", "know", "learn", "remember", "forget", "understand", "believe",
+        "want", "need", "like", "love", "hate", "hope", "wish", "dream", "plan", "try",
+        "start", "stop", "finish", "begin", "end", "continue", "change", "grow", "help", "work",
+        "play", "study", "read", "write", "draw", "paint", "build", "make", "create", "design",
+        "find", "lose", "get", "give", "take", "bring", "carry", "hold", "drop", "throw",
+        "catch", "kick", "hit", "push", "pull", "lift", "move", "turn", "bend", "stretch"
     )
 
     private val generativeModel = GenerativeModel(
-        modelName = "gemini-1.5-flash",
-        apiKey = BuildConfig.apiKey
+        modelName = "gemini-2.0-flash",
+        apiKey = BuildConfig.translationApiKey.also { key ->
+            Log.d(TAG, "API Key length: ${key.length}")
+            if (key.isEmpty()) {
+                Log.e(TAG, "API Key is empty!")
+            }
+        }
     )
 
     fun setSpeechRate(rate: Float) {
@@ -102,150 +130,104 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    fun generateStory(userPrompt: String) {
-        _uiState.value = UiState.Loading
+    private suspend fun generateStory(prompt: String) {
+        try {
+            _uiState.value = UiState.Loading
+            Log.d(TAG, "Starting story generation")
 
-        // Выбираем 4 случайных слова из доступного списка
-        val selectedWords = availableWords.shuffled().take(4)
-        
-        val prompt = if (!isRussian) {
-            """
-                Create a bilingual story (English and Russian) using these words: ${selectedWords.joinToString(", ")}.
-                Additional context from user: $userPrompt
-                
-                Requirements:
-                1. First, provide translations for all the selected words in this format:
-                   Word: [English word] - [Russian translation] - [Transcription]
-                2. Then create a story that is 3-4 paragraphs long
-                3. Provide the story in both English and Russian (paragraph by paragraph)
-                4. Each selected word must be used at least once
-                5. The story should be engaging and creative
-                6. Make sure the story flows naturally and the words are used in context
-                7. After the story, provide a vocabulary list of ALL words used in the story (not just the selected ones)
-                
-                Format the response like this:
-                TRANSLATIONS:
-                [word translations as specified above]
-                
-                ENGLISH STORY:
-                [English version of the story]
-                
-                RUSSIAN STORY:
-                [Russian version of the story]
-                
-                VOCABULARY:
-                [List all unique words from the story in format: English word - Russian translation - [transcription]]
-            """.trimIndent()
-        } else {
-            """
-                Создай двуязычную историю (на русском и английском) используя эти слова: ${selectedWords.joinToString(", ")}.
-                Дополнительный контекст от пользователя: $userPrompt
-                
-                Требования:
-                1. Сначала предоставь переводы всех выбранных слов в таком формате:
-                   Слово: [Английское слово] - [Русский перевод] - [Транскрипция]
-                2. Затем создай историю длиной 3-4 абзаца
-                3. Предоставь историю на обоих языках (абзац за абзацем)
-                4. Каждое выбранное слово должно быть использовано хотя бы раз
-                5. История должна быть увлекательной и креативной
-                6. Убедись, что история течет естественно и слова используются в контексте
-                7. После истории предоставь словарь ВСЕХ использованных слов (не только выбранных)
-                
-                Форматируй ответ так:
-                ПЕРЕВОДЫ:
-                [переводы слов как указано выше]
-                
-                АНГЛИЙСКАЯ ВЕРСИЯ:
-                [История на английском]
-                
-                РУССКАЯ ВЕРСИЯ:
-                [История на русском]
-                
-                СЛОВАРЬ:
-                [Список всех уникальных слов из истории в формате: Английское слово - Русский перевод - [транскрипция]]
-            """.trimIndent()
-        }
+            // Разбиваем слова на группы по 25 слов для оптимальной обработки
+            val wordBatches = availableWords.chunked(25)
+            var fullEnglishStory = ""
+            var fullRussianStory = ""
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val response = generativeModel.generateContent(prompt)
-                response.text?.let { outputContent ->
-                    // Разбираем ответ на секции по маркерам
-                    val translationsStart = outputContent.indexOf("TRANSLATIONS:")
-                    val englishStart = outputContent.indexOf("ENGLISH STORY:")
-                    val russianStart = outputContent.indexOf("RUSSIAN STORY:")
-                    val vocabularyStart = outputContent.indexOf(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:")
+            // Генерируем историю для каждой группы слов
+            wordBatches.forEachIndexed { index, batch ->
+                val batchPrompt = """
+                    You are a creative storyteller. Create a story part using these ${batch.size} words: ${batch.joinToString(", ")}.
                     
-                    val translations = if (translationsStart >= 0 && englishStart > translationsStart) {
-                        outputContent.substring(translationsStart, englishStart).trim()
-                    } else {
-                        ""
-                    }
+                    Rules:
+                    1. Use EVERY word from the list exactly once
+                    2. Keep the story natural and engaging
+                    3. Write a coherent story part that can connect with other parts
+                    4. Format your response EXACTLY like this:
                     
-                    val englishStory = if (englishStart >= 0 && russianStart > englishStart) {
-                        outputContent.substring(englishStart, russianStart)
-                            .replace("ENGLISH STORY:", "").trim()
-                    } else {
-                        ""
-                    }
+                    ENGLISH:
+                    [Your English story here]
                     
-                    val russianStory = if (russianStart >= 0 && vocabularyStart > russianStart) {
-                        outputContent.substring(russianStart, vocabularyStart)
-                            .replace("RUSSIAN STORY:", "").trim()
-                    } else {
-                        ""
-                    }
+                    RUSSIAN:
+                    [Your Russian translation here]
                     
-                    val vocabulary = if (vocabularyStart >= 0) {
-                        outputContent.substring(vocabularyStart)
-                            .replace(if (!isRussian) "VOCABULARY:" else "СЛОВАРЬ:", "").trim()
-                    } else {
-                        ""
-                    }
-                    
-                    // Объединяем переводы выбранных слов и словарь
-                    val allTranslations = """
-                        $translations
-                        
-                        $vocabulary
-                    """.trimIndent()
-                    
-                    // Сохраняем все версии текста
-                    _uiState.value = UiState.Success(
-                        outputText = englishStory, // Показываем изначально английскую версию
-                        selectedWords = selectedWords,
-                        isRussian = isRussian,
-                        translations = allTranslations,
-                        englishVersion = englishStory,
-                        russianVersion = russianStory
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.value = UiState.Error(e.localizedMessage ?: "Failed to generate story")
+                    Do not include any other text or explanations.
+                """.trimIndent()
+
+                Log.d(TAG, "Generating story part ${index + 1} of ${wordBatches.size}")
+                val response = generativeModel.generateContent(batchPrompt)
+                val text = response.text ?: throw Exception("Empty response from API")
+                Log.d(TAG, "Received response from API for part ${index + 1}")
+                Log.d(TAG, "Raw response: $text")
+
+                // Извлекаем английский и русский текст
+                val englishText = text.substringAfter("ENGLISH:", "")
+                    .substringBefore("RUSSIAN:", "")
+                    .trim()
+                    .takeIf { it.isNotEmpty() }
+                    ?: throw Exception("English text not found in response")
+                
+                val russianText = text.substringAfter("RUSSIAN:", "")
+                    .trim()
+                    .takeIf { it.isNotEmpty() }
+                    ?: throw Exception("Russian text not found in response")
+
+                Log.d(TAG, "English part length: ${englishText.length}")
+                Log.d(TAG, "Russian part length: ${russianText.length}")
+                Log.d(TAG, "English part: $englishText")
+                Log.d(TAG, "Russian part: $russianText")
+
+                fullEnglishStory += if (fullEnglishStory.isEmpty()) englishText else "\n\n$englishText"
+                fullRussianStory += if (fullRussianStory.isEmpty()) russianText else "\n\n$russianText"
+
+                // Обновляем состояние после каждой части
+                _uiState.value = UiState.Success(
+                    englishVersion = fullEnglishStory.trim(),
+                    russianVersion = fullRussianStory.trim(),
+                    selectedWords = availableWords,
+                    isRussian = isRussian,
+                    currentSpokenWord = ""
+                )
+
+                // Увеличиваем паузу между запросами для стабильности
+                kotlinx.coroutines.delay(1000)
             }
+
+            Log.d(TAG, "Final English story length: ${fullEnglishStory.length}")
+            Log.d(TAG, "Final Russian story length: ${fullRussianStory.length}")
+
+            // Финальное обновление состояния
+            _uiState.value = UiState.Success(
+                englishVersion = fullEnglishStory.trim(),
+                russianVersion = fullRussianStory.trim(),
+                selectedWords = availableWords,
+                isRussian = isRussian,
+                currentSpokenWord = ""
+            )
+            Log.d(TAG, "Story generation completed successfully")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error generating story", e)
+            _uiState.value = UiState.Error("Error generating story: ${e.localizedMessage}")
         }
     }
 
-    fun toggleLanguage(prompt: String) {
+    fun toggleLanguage() {
         try {
             stopSpeaking() // Останавливаем воспроизведение при переключении языка
             
             val currentState = _uiState.value
             if (currentState is UiState.Success) {
                 isRussian = !isRussian
-                if (isRussian && currentState.russianVersion.isNotEmpty()) {
-                    _uiState.value = currentState.copy(
-                        outputText = currentState.russianVersion,
-                        isRussian = true
-                    )
-                } else if (!isRussian && currentState.englishVersion.isNotEmpty()) {
-                    _uiState.value = currentState.copy(
-                        outputText = currentState.englishVersion,
-                        isRussian = false
-                    )
-                } else {
-                    generateStory(prompt)
-                }
+                _uiState.value = currentState.copy(
+                    isRussian = isRussian
+                )
             }
         } catch (e: Exception) {
             _uiState.value = UiState.Error("Error toggling language: ${e.localizedMessage}")
@@ -311,71 +293,55 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    fun getWordInfo(word: String): Triple<String, String, String> {
-        // Получаем текущее состояние
-        val currentState = _uiState.value
+    suspend fun getWordInfo(word: String): Triple<String, String, String> {
+        val prompt = """
+            For the English word "$word", provide:
+            1. The International Phonetic Alphabet (IPA) transcription in square brackets
+            2. The Russian translation
+            3. A simple example sentence in English
+            
+            Format your response exactly like this:
+            TRANSCRIPTION: [phonetic symbols here]
+            TRANSLATION: Russian translation here
+            EXAMPLE: Example sentence here
+            
+            For example, if the word is "cat":
+            TRANSCRIPTION: [kæt]
+            TRANSLATION: кошка
+            EXAMPLE: I have a black cat.
+            
+            Make sure the transcription uses proper IPA symbols and is enclosed in square brackets.
+        """.trimIndent()
         
-        // Если у нас есть переводы от Gemini
-        if (currentState is UiState.Success) {
-            // Ищем слово в общем списке переводов (включая словарь)
-            // Если текст на русском, ищем русское слово для получения английского перевода
-            val wordPattern = if (isRussian) {
-                // Ищем формат "английское - русское" где русское слово совпадает с нашим
-                "(?i)([\\w\\s]+) - $word - \\[([^\\]]+)\\]".toRegex()
-            } else {
-                // Ищем формат "слово - перевод" где слово совпадает с нашим
-                "(?i)(?:Word: )?$word - ([^-]+) - \\[([^\\]]+)\\]".toRegex()
-            }
+        return try {
+            val response = generativeModel.generateContent(prompt).text?.trim() ?: ""
             
-            val match = wordPattern.find(currentState.translations)
+            // Parse the response
+            val transcription = response.substringAfter("TRANSCRIPTION: ")
+                .substringBefore("\n")
+                .trim()
             
-            if (match != null) {
-                if (isRussian) {
-                    // Если текст на русском, то первая группа - английское слово, вторая - транскрипция
-                    val (englishWord, transcription) = match.destructured
-                    return Triple("[$transcription]", englishWord.trim(), "")
-                } else {
-                    // Если текст на английском, то первая группа - русский перевод, вторая - транскрипция
-                    val (translation, transcription) = match.destructured
-                    return Triple("[$transcription]", translation.trim(), "")
-                }
+            val translation = response.substringAfter("TRANSLATION: ")
+                .substringBefore("\n")
+                .trim()
+            
+            val example = response.substringAfter("EXAMPLE: ")
+                .trim()
+            
+            Triple(transcription, translation, example)
+        } catch (e: Exception) {
+            Log.e("StoryViewModel", "Error getting word info: ${e.message}")
+            Triple("[${word}]", "Ошибка перевода", "Error getting example")
+        }
+    }
+
+    fun getWordInfoAndUpdate(word: String, onResult: (Triple<String, String, String>) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = getWordInfo(word)
+            withContext(Dispatchers.Main) {
+                onResult(result)
             }
         }
-        
-        // Если перевод не найден в Gemini, используем предопределенные переводы
-        val (transcription, translation) = if (isRussian) {
-            // Если текст на русском, ищем английский эквивалент
-            when (word.lowercase()) {
-                "приключение" -> Pair("[ədˈventʃə]", "adventure")
-                "тайна" -> Pair("[ˈmɪstəri]", "mystery")
-                "радуга" -> Pair("[ˈreɪnbəʊ]", "rainbow")
-                "дракон" -> Pair("[ˈdræɡən]", "dragon")
-                "сокровище" -> Pair("[ˈtreʒə]", "treasure")
-                "магия" -> Pair("[ˈmædʒɪk]", "magic")
-                "путешествие" -> Pair("[ˈdʒɜːni]", "journey")
-                "лес" -> Pair("[ˈfɒrɪst]", "forest")
-                "замок" -> Pair("[ˈkɑːsl]", "castle")
-                "океан" -> Pair("[ˈəʊʃn]", "ocean")
-                else -> Pair("[$word]", "Translation not found")
-            }
-        } else {
-            // Если текст на английском, ищем русский перевод
-            when (word.lowercase()) {
-                "adventure" -> Pair("[ədˈventʃə]", "Приключение")
-                "mystery" -> Pair("[ˈmɪstəri]", "Тайна")
-                "rainbow" -> Pair("[ˈreɪnbəʊ]", "Радуга")
-                "dragon" -> Pair("[ˈdræɡən]", "Дракон")
-                "treasure" -> Pair("[ˈtreʒə]", "Сокровище")
-                "magic" -> Pair("[ˈmædʒɪk]", "Магия")
-                "journey" -> Pair("[ˈdʒɜːni]", "Путешествие")
-                "forest" -> Pair("[ˈfɒrɪst]", "Лес")
-                "castle" -> Pair("[ˈkɑːsl]", "Замок")
-                "ocean" -> Pair("[ˈəʊʃn]", "Океан")
-                else -> Pair("[$word]", "Перевод не найден")
-            }
-        }
-        
-        return Triple(transcription, translation, "")
     }
 
     fun speakTextSmooth(context: Context, text: String) {
@@ -395,6 +361,17 @@ class StoryViewModel : ViewModel() {
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
         } catch (e: Exception) {
             _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
+        }
+    }
+
+    fun startStoryGeneration(prompt: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                generateStory(prompt)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in story generation", e)
+                _uiState.value = UiState.Error("Error in story generation: ${e.localizedMessage}")
+            }
         }
     }
 
