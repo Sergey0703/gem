@@ -375,6 +375,39 @@ class StoryViewModel : ViewModel() {
         }
     }
 
+    fun speakTextWithHighlight(context: Context, text: String) {
+        viewModelScope.launch {
+            val sentences = text.split(Regex("[.!?]+\\s+"))
+            
+            for (sentence in sentences) {
+                if (sentence.isBlank()) continue
+                
+                // Update UI with current sentence
+                _uiState.value = when (val currentState = _uiState.value) {
+                    is UiState.Success -> currentState.copy(
+                        currentSpokenWord = sentence.trim()
+                    )
+                    else -> currentState
+                }
+                
+                // Speak the sentence
+                tts?.let { tts ->
+                    tts.speak(sentence.trim(), TextToSpeech.QUEUE_FLUSH, null, null)
+                    // Wait for the sentence to be spoken
+                    delay(sentence.length * 90L) // Approximate timing based on text length
+                }
+            }
+            
+            // Clear highlighted text when done
+            _uiState.value = when (val currentState = _uiState.value) {
+                is UiState.Success -> currentState.copy(
+                    currentSpokenWord = ""
+                )
+                else -> currentState
+            }
+        }
+    }
+
     override fun onCleared() {
         try {
             stopSpeaking()

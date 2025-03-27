@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -179,6 +180,19 @@ fun StoryScreen(
                                             contentDescription = "Read text"
                                         )
                                     }
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            storyViewModel.speakTextWithHighlight(
+                                                context,
+                                                if (state.isRussian) state.russianVersion else state.englishVersion
+                                            )
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.VolumeUp,
+                                            contentDescription = "Read text with highlighting"
+                                        )
+                                    }
                                 }
                             }
 
@@ -222,13 +236,27 @@ fun StoryScreen(
                                         }
                                     }
                                     
-                                    Text(
-                                        text = annotatedText,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp)
-                                    )
+                                    Column {
+                                        Text(
+                                            text = annotatedText,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 8.dp)
+                                        )
+                                        
+                                        if (state.currentSpokenWord.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = state.currentSpokenWord,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(Color(0xFFFFF176))
+                                                    .padding(4.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
