@@ -67,6 +67,7 @@ fun StoryScreen(
     var showWordDialog by remember { mutableStateOf(false) }
     var showSelectedWords by remember { mutableStateOf(false) }
     var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
+    var highlightedSentence by remember { mutableStateOf("") }
 
     // Инициализация TextToSpeech
     LaunchedEffect(Unit) {
@@ -300,7 +301,8 @@ fun StoryScreen(
                                         onClick = {
                                             storyViewModel.speakText(
                                                 context,
-                                                if (state.isRussian) state.russianVersion else state.englishVersion
+                                                if (state.isRussian) state.russianVersion else state.englishVersion,
+                                                highlightedSentence
                                             )
                                         }
                                     ) {
@@ -313,7 +315,8 @@ fun StoryScreen(
                                         onClick = {
                                             storyViewModel.speakTextWithHighlight(
                                                 context,
-                                                if (state.isRussian) state.russianVersion else state.englishVersion
+                                                if (state.isRussian) state.russianVersion else state.englishVersion,
+                                                highlightedSentence
                                             )
                                         }
                                     ) {
@@ -357,8 +360,9 @@ fun StoryScreen(
                                                     .padding(top = 8.dp)
                                             ) {
                                                 text.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])")).forEach { sentence ->
-                                                    val shouldHighlight = currentSpokenWord.isNotEmpty() && 
-                                                        sentence.trim() == currentSpokenWord.trim()
+                                                    val shouldHighlight = (currentSpokenWord.isNotEmpty() && 
+                                                        sentence.trim() == currentSpokenWord.trim()) ||
+                                                        sentence.trim() == highlightedSentence.trim()
                                                     
                                                     sentence.split(Regex("\\s+")).forEach { word ->
                                                         val cleanWord = word.trim().replace(Regex("[^\\p{L}\\p{N}-]"), "")
@@ -370,6 +374,9 @@ fun StoryScreen(
                                                                 modifier = Modifier
                                                                     .pointerInput(Unit) {
                                                                         detectTapGestures(
+                                                                            onTap = {
+                                                                                highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+                                                                            },
                                                                             onLongPress = {
                                                                                 selectedWord = cleanWord
                                                                                 storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->

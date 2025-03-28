@@ -289,7 +289,7 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    fun speakText(context: Context, text: String) {
+    fun speakText(context: Context, text: String, highlightedSentence: String = "") {
         try {
             initializeTTS(context)
             
@@ -308,13 +308,21 @@ class StoryViewModel : ViewModel() {
                 setTTSLanguage(state.isRussian)
             }
 
-            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
+            // Разбиваем текст на предложения
+            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])"))
                 .filter { it.isNotBlank() }
                 .map { it.trim() }
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
-                currentSentenceIndex = 0
+                
+                // Определяем начальный индекс
+                currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
+                    sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
+                } else {
+                    0
+                }
+
                 speakNextSentence()
             }
         } catch (e: Exception) {
@@ -458,7 +466,7 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    fun speakTextWithHighlight(context: Context, text: String) {
+    fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "") {
         try {
             initializeTTS(context)
             
@@ -477,14 +485,20 @@ class StoryViewModel : ViewModel() {
                 setTTSLanguage(state.isRussian)
             }
 
-            // Разбиваем текст на предложения, сохраняя знаки препинания
-            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
+            // Разбиваем текст на предложения
+            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])"))
                 .filter { it.isNotBlank() }
                 .map { it.trim() }
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
-                currentSentenceIndex = 0
+                
+                // Определяем начальный индекс
+                currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
+                    sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
+                } else {
+                    0
+                }
                 
                 // Обновляем UI с первым предложением
                 viewModelScope.launch {
