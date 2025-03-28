@@ -132,7 +132,10 @@ class StoryViewModel : ViewModel() {
 
     private suspend fun generateStory(prompt: String, maxAttempts: Int = 5) {
         try {
-            _uiState.value = UiState.Loading
+            _uiState.value = UiState.Loading(
+                maxAttempts = maxAttempts,
+                totalWords = availableWords.size
+            )
             Log.d(TAG, "Starting story generation")
 
             var attempt = 1
@@ -141,6 +144,12 @@ class StoryViewModel : ViewModel() {
             val errorThreshold = availableWords.size / 10 // 10% от общего количества слов
 
             while (attempt <= maxAttempts) {
+                _uiState.value = UiState.Loading(
+                    attempt = attempt,
+                    maxAttempts = maxAttempts,
+                    totalWords = availableWords.size
+                )
+
                 val storyPrompt = if (attempt == 1) {
                     """
                         You are a creative storyteller. Create an engaging and coherent story that MUST use ALL of these words: ${availableWords.joinToString(", ")}.
@@ -189,14 +198,24 @@ class StoryViewModel : ViewModel() {
                     englishStory.contains("*$word*", ignoreCase = true)
                 }
                 
-                Log.d(TAG, "Story generated - Attempt $attempt")
-                Log.d(TAG, "English story length: ${englishStory.length}")
-                Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
-                
                 // Не все слова использованы, готовимся к следующей попытке
                 lastMissingWords = availableWords.filter { word ->
                     !englishStory.contains("*$word*", ignoreCase = true)
                 }
+
+                // Обновляем состояние с прогрессом
+                _uiState.value = UiState.Loading(
+                    attempt = attempt,
+                    maxAttempts = maxAttempts,
+                    usedWordsCount = usedWords.size,
+                    totalWords = availableWords.size,
+                    storyLength = englishStory.length,
+                    missingWords = lastMissingWords
+                )
+                
+                Log.d(TAG, "Story generated - Attempt $attempt")
+                Log.d(TAG, "English story length: ${englishStory.length}")
+                Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
                 
                 if (lastMissingWords.isEmpty()) {
                     // Все слова использованы, обновляем состояние и завершаем
@@ -212,7 +231,6 @@ class StoryViewModel : ViewModel() {
                 } else {
                     Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
                     
-                    // Проверяем, последняя ли это попытка и превышен ли порог ошибки
                     if (attempt == maxAttempts && lastMissingWords.size >= errorThreshold) {
                         throw Exception("Failed to use enough words after $maxAttempts attempts. Missing ${lastMissingWords.size} words (threshold: $errorThreshold).")
                     } else if (attempt == maxAttempts) {

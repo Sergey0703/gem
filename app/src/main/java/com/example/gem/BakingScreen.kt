@@ -55,10 +55,6 @@ fun StoryScreen(
     storyViewModel: StoryViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val placeholderPrompt = stringResource(R.string.prompt_placeholder)
-    val placeholderResult = stringResource(R.string.results_placeholder)
-    var prompt by rememberSaveable { mutableStateOf(placeholderPrompt) }
-    var result by rememberSaveable { mutableStateOf(placeholderResult) }
     val uiState by storyViewModel.uiState.collectAsState()
     
     var selectedWord by remember { mutableStateOf<String?>(null) }
@@ -80,62 +76,115 @@ fun StoryScreen(
             modifier = Modifier.padding(16.dp)
         )
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = prompt,
-                onValueChange = { newValue -> prompt = newValue },
-                label = { Text(stringResource(R.string.label_prompt)) },
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp)
-            )
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                IconButton(
-                    onClick = { storyViewModel.toggleLanguage() }
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Language,
-                        contentDescription = "Toggle language"
-                    )
-                }
-
-                Button(
-                    onClick = { storyViewModel.startStoryGeneration(prompt) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text("Generate")
-                }
-            }
-        }
-
         when (val state = uiState) {
             is UiState.Loading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    CircularProgressIndicator()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (state.attempt > 0) {
+                            Text(
+                                text = "Story generated - Attempt ${state.attempt}/${state.maxAttempts}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (state.storyLength > 0) {
+                                Text(
+                                    text = "Length: ${state.storyLength}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (state.usedWordsCount > 0) {
+                                Text(
+                                    text = "Used words count: ${state.usedWordsCount}/${state.totalWords}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (state.missingWords.isNotEmpty()) {
+                                Text(
+                                    text = "Missing words: ${state.missingWords.joinToString(", ")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            progress = state.attempt.toFloat() / state.maxAttempts
+                        )
+                    }
                 }
             }
             is UiState.Success -> {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Story generated successfully",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Length: ${state.englishVersion.length}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Words used: ${state.selectedWords.size}/${state.selectedWords.size}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = { storyViewModel.toggleLanguage() }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Language,
+                                    contentDescription = "Toggle language"
+                                )
+                            }
+
+                            Button(
+                                onClick = { storyViewModel.startStoryGeneration("") }
+                            ) {
+                                Text("Generate")
+                            }
+                        }
+                    }
+                }
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(16.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                    // Single card for both story and words
+                    // Story display card
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -299,17 +348,60 @@ fun StoryScreen(
                 }
             }
             is UiState.Error -> {
-                Text(
-                    text = state.message,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(16.dp)
-                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = state.message,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { storyViewModel.startStoryGeneration("") }
+                        ) {
+                            Text("Retry")
+                        }
+                    }
+                }
             }
             else -> {
-                Text(
-                    text = "Enter your prompt and press Generate",
-                    modifier = Modifier.padding(16.dp)
-                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Press Generate to create a story",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { storyViewModel.startStoryGeneration("") }
+                        ) {
+                            Text("Generate")
+                        }
+                    }
+                }
             }
         }
     }
