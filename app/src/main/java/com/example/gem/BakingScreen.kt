@@ -156,17 +156,30 @@ fun StoryScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            Text(
+                                text = "Generation time: ${state.generationTime}s",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(
-                                onClick = { storyViewModel.toggleLanguage() }
+                                onClick = { storyViewModel.toggleLanguage() },
+                                enabled = !state.isTranslating
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Language,
-                                    contentDescription = "Toggle language"
-                                )
+                                if (state.isTranslating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Filled.Language,
+                                        contentDescription = "Toggle language"
+                                    )
+                                }
                             }
 
                             Button(
@@ -255,55 +268,64 @@ fun StoryScreen(
                                         .fillMaxSize()
                                         .verticalScroll(rememberScrollState())
                                 ) {
-                                    val text = if (state.isRussian) state.russianVersion else state.englishVersion
-                                    val annotatedText = buildAnnotatedString {
-                                        var currentIndex = 0
-                                        val pattern = Regex("""\*\*([^*]+)\*\*|\*([^*]+)\*""")
-                                        
-                                        pattern.findAll(text).forEach { matchResult ->
-                                            // Add text before the match
-                                            append(text.substring(currentIndex, matchResult.range.first))
+                                    if (state.isTranslating) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator()
+                                        }
+                                    } else {
+                                        val text = if (state.isRussian) state.russianVersion else state.englishVersion
+                                        val annotatedText = buildAnnotatedString {
+                                            var currentIndex = 0
+                                            val pattern = Regex("""\*\*([^*]+)\*\*|\*([^*]+)\*""")
                                             
-                                            // Get the word without asterisks
-                                            val word = matchResult.groupValues[1].ifEmpty { matchResult.groupValues[2] }
-                                            
-                                            // Add the word with special style
-                                            withStyle(
-                                                style = SpanStyle(
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            ) {
-                                                append(word)
+                                            pattern.findAll(text).forEach { matchResult ->
+                                                // Add text before the match
+                                                append(text.substring(currentIndex, matchResult.range.first))
+                                                
+                                                // Get the word without asterisks
+                                                val word = matchResult.groupValues[1].ifEmpty { matchResult.groupValues[2] }
+                                                
+                                                // Add the word with special style
+                                                withStyle(
+                                                    style = SpanStyle(
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                ) {
+                                                    append(word)
+                                                }
+                                                
+                                                currentIndex = matchResult.range.last + 1
                                             }
                                             
-                                            currentIndex = matchResult.range.last + 1
+                                            // Add remaining text
+                                            if (currentIndex < text.length) {
+                                                append(text.substring(currentIndex))
+                                            }
                                         }
                                         
-                                        // Add remaining text
-                                        if (currentIndex < text.length) {
-                                            append(text.substring(currentIndex))
-                                        }
-                                    }
-                                    
-                                    Column {
-                                        Text(
-                                            text = annotatedText,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 8.dp)
-                                        )
-                                        
-                                        if (state.currentSpokenWord.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(8.dp))
+                                        Column {
                                             Text(
-                                                text = state.currentSpokenWord,
+                                                text = annotatedText,
                                                 style = MaterialTheme.typography.bodyLarge,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .background(Color(0xFFFFF176))
-                                                    .padding(4.dp)
+                                                    .padding(top = 8.dp)
                                             )
+                                            
+                                            if (state.currentSpokenWord.isNotEmpty()) {
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                    text = state.currentSpokenWord,
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .background(Color(0xFFFFF176))
+                                                        .padding(4.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }

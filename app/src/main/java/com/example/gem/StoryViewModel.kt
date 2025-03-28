@@ -27,6 +27,7 @@ class StoryViewModel : ViewModel() {
     private var currentSentenceIndex = 0
     private var sentences = listOf<String>()
     private var speechRate = 1.0f
+    private var currentLanguage = "en"
 
     // Список из 300 слов для генерации истории
     private val availableWords = listOf(
@@ -130,7 +131,7 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    private suspend fun generateStory(prompt: String, maxAttempts: Int = 5) {
+    private suspend fun generateStory(prompt: String, maxAttempts: Int = 5): Triple<String, String, List<String>> {
         try {
             _uiState.value = UiState.Loading(
                 maxAttempts = maxAttempts,
@@ -224,10 +225,11 @@ class StoryViewModel : ViewModel() {
                         russianVersion = "",
                         selectedWords = availableWords,
                         isRussian = false,
-                        currentSpokenWord = ""
+                        currentSpokenWord = "",
+                        generationTime = 0.0
                     )
                     Log.d(TAG, "Story generation completed successfully")
-                    return
+                    return Triple(englishStory, "", availableWords)
                 } else {
                     Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
                     
@@ -240,10 +242,11 @@ class StoryViewModel : ViewModel() {
                             russianVersion = "",
                             selectedWords = availableWords,
                             isRussian = false,
-                            currentSpokenWord = ""
+                            currentSpokenWord = "",
+                            generationTime = 0.0
                         )
                         Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
-                        return
+                        return Triple(englishStory, "", availableWords)
                     }
                 }
                 
@@ -252,62 +255,58 @@ class StoryViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e(TAG, "Error generating story", e)
             _uiState.value = UiState.Error("Error generating story: ${e.localizedMessage}")
+            return Triple("", "", listOf())
         }
-    }
-
-    fun translateStory() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val currentState = _uiState.value as? UiState.Success ?: return@launch
-                val englishStory = currentState.englishVersion
-
-                val translationPrompt = """
-                    Translate this story to Russian. Keep the same formatting and paragraph breaks.
-                    Mark the translated equivalents of marked words with asterisks.
-                    
-                    Story to translate:
-                    $englishStory
-                    
-                    Provide only the Russian translation, no additional text.
-                """.trimIndent()
-
-                Log.d(TAG, "Requesting translation")
-                val response = generativeModel.generateContent(translationPrompt)
-                val russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
-                
-                Log.d(TAG, "Translation received")
-                Log.d(TAG, "Russian story length: ${russianStory.length}")
-
-                // Обновляем состояние с переводом
-                _uiState.value = currentState.copy(
-                    russianVersion = russianStory
-                )
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error translating story", e)
-                _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
-            }
-        }
+        return Triple("", "", listOf())
     }
 
     fun toggleLanguage() {
-        try {
-            stopSpeaking() // Останавливаем воспроизведение при переключении языка
-            
-            val currentState = _uiState.value
-            if (currentState is UiState.Success) {
-                // Если пытаемся переключиться на русский, но перевода еще нет - запрашиваем его
-                if (!isRussian && currentState.russianVersion.isEmpty()) {
-                    translateStory()
+        val currentState = _uiState.value
+        if (currentState is UiState.Success) {
+            _uiState.value = currentState.copy(isTranslating = true)
+            viewModelScope.launch {
+                // Если переключаемся на русский и перевода еще нет
+                if (!currentState.isRussian && currentState.russianVersion.isEmpty()) {
+                    try {
+                        val translationPrompt = """
+                            Translate this story to Russian. Keep the same formatting and paragraph breaks.
+                            Mark the translated equivalents of marked words with asterisks.
+                            Do not add any additional formatting or special characters.
+                            
+                            Story to translate:
+                            ${currentState.englishVersion}
+                            
+                            Provide only the Russian translation, no additional text.
+                        """.trimIndent()
+
+                        Log.d(TAG, "Requesting translation")
+                        val response = generativeModel.generateContent(translationPrompt)
+                        var russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
+                        
+                        // Очищаем текст от лишних обратных слешей
+                        russianStory = russianStory.replace("\\", "")
+                        
+                        Log.d(TAG, "Translation received")
+                        Log.d(TAG, "Russian story length: ${russianStory.length}")
+
+                        _uiState.value = currentState.copy(
+                            russianVersion = russianStory,
+                            isRussian = true,
+                            isTranslating = false
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error translating story", e)
+                        _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
+                    }
+                } else {
+                    // Просто переключаем язык, если перевод уже есть
+                    delay(500) // Небольшая задержка для анимации
+                    _uiState.value = currentState.copy(
+                        isRussian = !currentState.isRussian,
+                        isTranslating = false
+                    )
                 }
-                
-                isRussian = !isRussian
-                _uiState.value = currentState.copy(
-                    isRussian = isRussian
-                )
             }
-        } catch (e: Exception) {
-            _uiState.value = UiState.Error("Error toggling language: ${e.localizedMessage}")
         }
     }
 
@@ -442,12 +441,22 @@ class StoryViewModel : ViewModel() {
     }
 
     fun startStoryGeneration(prompt: String) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
+            _uiState.value = UiState.Loading()
             try {
-                generateStory(prompt)
+                val startTime = System.currentTimeMillis()
+                val result = generateStory(prompt)
+                val endTime = System.currentTimeMillis()
+                val generationTime = (endTime - startTime) / 1000.0
+
+                _uiState.value = UiState.Success(
+                    englishVersion = result.first,
+                    russianVersion = result.second,
+                    selectedWords = result.third,
+                    generationTime = generationTime
+                )
             } catch (e: Exception) {
-                Log.e(TAG, "Error in story generation", e)
-                _uiState.value = UiState.Error("Error in story generation: ${e.localizedMessage}")
+                _uiState.value = UiState.Error(e.message ?: "Unknown error occurred")
             }
         }
     }

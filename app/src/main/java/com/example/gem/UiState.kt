@@ -16,9 +16,9 @@ sealed class UiState {
     data class Loading(
         val attempt: Int = 0,
         val maxAttempts: Int = 5,
+        val storyLength: Int = 0,
         val usedWordsCount: Int = 0,
         val totalWords: Int = 0,
-        val storyLength: Int = 0,
         val missingWords: List<String> = emptyList()
     ) : UiState()
 
@@ -29,8 +29,10 @@ sealed class UiState {
         val englishVersion: String,
         val russianVersion: String,
         val selectedWords: List<String>,
-        val isRussian: Boolean,
-        val currentSpokenWord: String
+        val isRussian: Boolean = false,
+        val currentSpokenWord: String = "",
+        val generationTime: Double = 0.0,
+        val isTranslating: Boolean = false
     ) : UiState()
 
     /**
