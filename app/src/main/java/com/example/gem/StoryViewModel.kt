@@ -130,91 +130,145 @@ class StoryViewModel : ViewModel() {
         }
     }
 
-    private suspend fun generateStory(prompt: String) {
+    private suspend fun generateStory(prompt: String, maxAttempts: Int = 5) {
         try {
             _uiState.value = UiState.Loading
             Log.d(TAG, "Starting story generation")
 
-            // Разбиваем слова на группы по 25 слов для оптимальной обработки
-            val wordBatches = availableWords.chunked(25)
-            var fullEnglishStory = ""
-            var fullRussianStory = ""
+            var attempt = 1
+            var lastMissingWords = availableWords
+            var englishStory = ""
+            val errorThreshold = availableWords.size / 10 // 10% от общего количества слов
 
-            // Генерируем историю для каждой группы слов
-            wordBatches.forEachIndexed { index, batch ->
-                val batchPrompt = """
-                    You are a creative storyteller. Create a story part using these ${batch.size} words: ${batch.joinToString(", ")}.
-                    
-                    Rules:
-                    1. Use EVERY word from the list exactly once
-                    2. Keep the story natural and engaging
-                    3. Write a coherent story part that can connect with other parts
-                    4. Format your response EXACTLY like this:
-                    
-                    ENGLISH:
-                    [Your English story here]
-                    
-                    RUSSIAN:
-                    [Your Russian translation here]
-                    
-                    Do not include any other text or explanations.
-                """.trimIndent()
+            while (attempt <= maxAttempts) {
+                val storyPrompt = if (attempt == 1) {
+                    """
+                        You are a creative storyteller. Create an engaging and coherent story that MUST use ALL of these words: ${availableWords.joinToString(", ")}.
+                        
+                        Rules:
+                        1. Use EVERY word from the list exactly once - this is the most important rule
+                        2. Mark each used word with asterisks like this: *word*
+                        3. Create a story that flows naturally despite using all required words
+                        4. Break the story into logical paragraphs for readability
+                        5. Make sure the story has a clear beginning, middle, and end
+                        6. Focus on making connections between words to create a coherent narrative
+                        
+                        Important:
+                        - Every word from the list MUST be used exactly once
+                        - Only mark the exact words with asterisks
+                        - Write only the story, no additional text or explanations
+                        - Make sure the story makes sense and reads naturally
+                    """.trimIndent()
+                } else {
+                    """
+                        Please revise the story to include these missing words: ${lastMissingWords.joinToString(", ")}.
+                        
+                        Previous attempt: 
+                        $englishStory
+                        
+                        Rules:
+                        1. Use EVERY missing word exactly once while keeping the story coherent
+                        2. Mark the used words with asterisks like this: *word*
+                        3. You can modify the existing story to naturally incorporate the missing words
+                        4. Keep the story's structure and main ideas, but expand it to include all words
+                        5. Ensure the story flows naturally and makes sense
+                        
+                        Important:
+                        - Every word from the missing list MUST be used
+                        - Only mark the exact words with asterisks
+                        - Write the complete story, not just the additions
+                    """.trimIndent()
+                }
 
-                Log.d(TAG, "Generating story part ${index + 1} of ${wordBatches.size}")
-                val response = generativeModel.generateContent(batchPrompt)
-                val text = response.text ?: throw Exception("Empty response from API")
-                Log.d(TAG, "Received response from API for part ${index + 1}")
-                Log.d(TAG, "Raw response: $text")
-
-                // Извлекаем английский и русский текст
-                val englishText = text.substringAfter("ENGLISH:", "")
-                    .substringBefore("RUSSIAN:", "")
-                    .trim()
-                    .takeIf { it.isNotEmpty() }
-                    ?: throw Exception("English text not found in response")
+                Log.d(TAG, "Generating story - Attempt $attempt of $maxAttempts")
+                val response = generativeModel.generateContent(storyPrompt)
+                englishStory = response.text?.trim() ?: throw Exception("Empty response from API")
                 
-                val russianText = text.substringAfter("RUSSIAN:", "")
-                    .trim()
-                    .takeIf { it.isNotEmpty() }
-                    ?: throw Exception("Russian text not found in response")
-
-                Log.d(TAG, "English part length: ${englishText.length}")
-                Log.d(TAG, "Russian part length: ${russianText.length}")
-                Log.d(TAG, "English part: $englishText")
-                Log.d(TAG, "Russian part: $russianText")
-
-                fullEnglishStory += if (fullEnglishStory.isEmpty()) englishText else "\n\n$englishText"
-                fullRussianStory += if (fullRussianStory.isEmpty()) russianText else "\n\n$russianText"
-
-                // Обновляем состояние после каждой части
-                _uiState.value = UiState.Success(
-                    englishVersion = fullEnglishStory.trim(),
-                    russianVersion = fullRussianStory.trim(),
-                    selectedWords = availableWords,
-                    isRussian = isRussian,
-                    currentSpokenWord = ""
-                )
-
-                // Увеличиваем паузу между запросами для стабильности
-                kotlinx.coroutines.delay(1000)
+                // Проверяем использование всех слов
+                val usedWords = availableWords.filter { word ->
+                    englishStory.contains("*$word*", ignoreCase = true)
+                }
+                
+                Log.d(TAG, "Story generated - Attempt $attempt")
+                Log.d(TAG, "English story length: ${englishStory.length}")
+                Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
+                
+                // Не все слова использованы, готовимся к следующей попытке
+                lastMissingWords = availableWords.filter { word ->
+                    !englishStory.contains("*$word*", ignoreCase = true)
+                }
+                
+                if (lastMissingWords.isEmpty()) {
+                    // Все слова использованы, обновляем состояние и завершаем
+                    _uiState.value = UiState.Success(
+                        englishVersion = englishStory,
+                        russianVersion = "",
+                        selectedWords = availableWords,
+                        isRussian = false,
+                        currentSpokenWord = ""
+                    )
+                    Log.d(TAG, "Story generation completed successfully")
+                    return
+                } else {
+                    Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
+                    
+                    // Проверяем, последняя ли это попытка и превышен ли порог ошибки
+                    if (attempt == maxAttempts && lastMissingWords.size >= errorThreshold) {
+                        throw Exception("Failed to use enough words after $maxAttempts attempts. Missing ${lastMissingWords.size} words (threshold: $errorThreshold).")
+                    } else if (attempt == maxAttempts) {
+                        // Если это последняя попытка, но пропущенных слов меньше порога, используем текущую версию
+                        _uiState.value = UiState.Success(
+                            englishVersion = englishStory,
+                            russianVersion = "",
+                            selectedWords = availableWords,
+                            isRussian = false,
+                            currentSpokenWord = ""
+                        )
+                        Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
+                        return
+                    }
+                }
+                
+                attempt++
             }
-
-            Log.d(TAG, "Final English story length: ${fullEnglishStory.length}")
-            Log.d(TAG, "Final Russian story length: ${fullRussianStory.length}")
-
-            // Финальное обновление состояния
-            _uiState.value = UiState.Success(
-                englishVersion = fullEnglishStory.trim(),
-                russianVersion = fullRussianStory.trim(),
-                selectedWords = availableWords,
-                isRussian = isRussian,
-                currentSpokenWord = ""
-            )
-            Log.d(TAG, "Story generation completed successfully")
-
         } catch (e: Exception) {
             Log.e(TAG, "Error generating story", e)
             _uiState.value = UiState.Error("Error generating story: ${e.localizedMessage}")
+        }
+    }
+
+    fun translateStory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currentState = _uiState.value as? UiState.Success ?: return@launch
+                val englishStory = currentState.englishVersion
+
+                val translationPrompt = """
+                    Translate this story to Russian. Keep the same formatting and paragraph breaks.
+                    Mark the translated equivalents of marked words with asterisks.
+                    
+                    Story to translate:
+                    $englishStory
+                    
+                    Provide only the Russian translation, no additional text.
+                """.trimIndent()
+
+                Log.d(TAG, "Requesting translation")
+                val response = generativeModel.generateContent(translationPrompt)
+                val russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
+                
+                Log.d(TAG, "Translation received")
+                Log.d(TAG, "Russian story length: ${russianStory.length}")
+
+                // Обновляем состояние с переводом
+                _uiState.value = currentState.copy(
+                    russianVersion = russianStory
+                )
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error translating story", e)
+                _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
+            }
         }
     }
 
@@ -224,6 +278,11 @@ class StoryViewModel : ViewModel() {
             
             val currentState = _uiState.value
             if (currentState is UiState.Success) {
+                // Если пытаемся переключиться на русский, но перевода еще нет - запрашиваем его
+                if (!isRussian && currentState.russianVersion.isEmpty()) {
+                    translateStory()
+                }
+                
                 isRussian = !isRussian
                 _uiState.value = currentState.copy(
                     isRussian = isRussian
