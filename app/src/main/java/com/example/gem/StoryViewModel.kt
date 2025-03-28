@@ -28,6 +28,7 @@ class StoryViewModel : ViewModel() {
     private var sentences = listOf<String>()
     private var speechRate = 1.0f
     private var currentLanguage = "en"
+    private var isSmoothReading = false // Добавляем флаг для чтения по предложениям
 
     // Список из 300 слов для генерации истории
     private val availableWords = listOf(
@@ -260,52 +261,30 @@ class StoryViewModel : ViewModel() {
         return Triple("", "", listOf())
     }
 
-    fun toggleLanguage() {
-        val currentState = _uiState.value
-        if (currentState is UiState.Success) {
-            _uiState.value = currentState.copy(isTranslating = true)
-            viewModelScope.launch {
-                // Если переключаемся на русский и перевода еще нет
-                if (!currentState.isRussian && currentState.russianVersion.isEmpty()) {
-                    try {
-                        val translationPrompt = """
-                            Translate this story to Russian. Keep the same formatting and paragraph breaks.
-                            Mark the translated equivalents of marked words with asterisks.
-                            Do not add any additional formatting or special characters.
-                            
-                            Story to translate:
-                            ${currentState.englishVersion}
-                            
-                            Provide only the Russian translation, no additional text.
-                        """.trimIndent()
+    private fun cleanTextForDisplay(text: String): String {
+        return text.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+            matchResult.groupValues[1] // Возвращаем только текст внутри звездочек
+        }
+    }
 
-                        Log.d(TAG, "Requesting translation")
-                        val response = generativeModel.generateContent(translationPrompt)
-                        var russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
-                        
-                        // Очищаем текст от лишних обратных слешей
-                        russianStory = russianStory.replace("\\", "")
-                        
-                        Log.d(TAG, "Translation received")
-                        Log.d(TAG, "Russian story length: ${russianStory.length}")
+    private fun cleanTextForSpeech(text: String): String {
+        // Убираем звездочки и другие специальные символы, оставляем только текст и базовую пунктуацию
+        return text.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+            matchResult.groupValues[1]
+        }.replace(Regex("[^\\p{L}\\p{N}\\s.,!?;:-]"), "") // Оставляем буквы, цифры, пробелы и основные знаки пунктуации
+    }
 
-                        _uiState.value = currentState.copy(
-                            russianVersion = russianStory,
-                            isRussian = true,
-                            isTranslating = false
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error translating story", e)
-                        _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
-                    }
-                } else {
-                    // Просто переключаем язык, если перевод уже есть
-                    delay(500) // Небольшая задержка для анимации
-                    _uiState.value = currentState.copy(
-                        isRussian = !currentState.isRussian,
-                        isTranslating = false
-                    )
-                }
+    private fun setTTSLanguage(isRussian: Boolean) {
+        tts?.let { tts ->
+            val locale = if (isRussian) {
+                Locale("ru")
+            } else {
+                Locale.US
+            }
+            val result = tts.setLanguage(locale)
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.e(TAG, "Language ${locale.language} is not supported")
+                _uiState.value = UiState.Error("Language ${if (isRussian) "Russian" else "English"} is not supported on this device")
             }
         }
     }
@@ -319,11 +298,17 @@ class StoryViewModel : ViewModel() {
                 return
             }
 
-            if (text.isBlank()) {
+            val cleanedText = cleanTextForSpeech(text)
+            if (cleanedText.isBlank()) {
                 return
             }
 
-            sentences = text.split(Regex("(?<=[.!?])\\s+"))
+            // Устанавливаем язык в зависимости от текущего состояния
+            (_uiState.value as? UiState.Success)?.let { state ->
+                setTTSLanguage(state.isRussian)
+            }
+
+            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
                 .filter { it.isNotBlank() }
                 .map { it.trim() }
 
@@ -351,6 +336,10 @@ class StoryViewModel : ViewModel() {
     fun speakWord(context: Context, word: String) {
         initializeTTS(context)
         stopSpeaking()
+        // Устанавливаем язык в зависимости от текущего состояния
+        (_uiState.value as? UiState.Success)?.let { state ->
+            setTTSLanguage(state.isRussian)
+        }
         tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "single_word")
     }
 
@@ -450,8 +439,8 @@ class StoryViewModel : ViewModel() {
                 val generationTime = (endTime - startTime) / 1000.0
 
                 _uiState.value = UiState.Success(
-                    englishVersion = result.first,
-                    russianVersion = result.second,
+                    englishVersion = cleanTextForDisplay(result.first),
+                    russianVersion = "",
                     selectedWords = result.third,
                     generationTime = generationTime
                 )
@@ -462,29 +451,67 @@ class StoryViewModel : ViewModel() {
     }
 
     fun speakTextWithHighlight(context: Context, text: String) {
-        viewModelScope.launch {
-            val sentences = text.split(Regex("[.!?]+\\s+"))
-            
-            for (sentence in sentences) {
-                if (sentence.isBlank()) continue
-                
-                // Update UI with current sentence
+        if (isSmoothReading) {
+            // Если уже читаем, останавливаем
+            isSmoothReading = false
+            stopSpeaking()
+            viewModelScope.launch {
                 _uiState.value = when (val currentState = _uiState.value) {
                     is UiState.Success -> currentState.copy(
-                        currentSpokenWord = sentence.trim()
+                        currentSpokenWord = ""
+                    )
+                    else -> currentState
+                }
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            isSmoothReading = true
+            
+            // Устанавливаем язык в зависимости от текущего состояния
+            (_uiState.value as? UiState.Success)?.let { state ->
+                setTTSLanguage(state.isRussian)
+            }
+            
+            // Разбиваем оригинальный текст на предложения, сохраняя знаки препинания
+            val originalSentences = text.split(Regex("(?<=[.!?])\\s+"))
+                .filter { it.isNotBlank() }
+                .map { it.trim() }
+
+            // Очищаем текст и разбиваем на предложения для чтения
+            val cleanedText = cleanTextForSpeech(text)
+            val cleanedSentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
+                .filter { it.isNotBlank() }
+                .map { it.trim() }
+            
+            originalSentences.zip(cleanedSentences).forEach { (originalSentence, cleanedSentence) ->
+                if (!isSmoothReading) return@forEach // Проверяем флаг остановки
+
+                // Обновляем UI с текущим предложением
+                _uiState.value = when (val currentState = _uiState.value) {
+                    is UiState.Success -> currentState.copy(
+                        currentSpokenWord = originalSentence
                     )
                     else -> currentState
                 }
                 
-                // Speak the sentence
-                tts?.let { tts ->
-                    tts.speak(sentence.trim(), TextToSpeech.QUEUE_FLUSH, null, null)
-                    // Wait for the sentence to be spoken
-                    delay(sentence.length * 90L) // Approximate timing based on text length
+                // Говорим предложение
+                withContext(Dispatchers.IO) {
+                    tts?.let { tts ->
+                        tts.speak(cleanedSentence, TextToSpeech.QUEUE_FLUSH, null, "sentence")
+                        // Ждем окончания произношения
+                        var speaking = true
+                        while (speaking && isSmoothReading) {
+                            speaking = tts.isSpeaking
+                            delay(100)
+                        }
+                    }
                 }
             }
             
-            // Clear highlighted text when done
+            // Очищаем подсветку по завершении
+            isSmoothReading = false
             _uiState.value = when (val currentState = _uiState.value) {
                 is UiState.Success -> currentState.copy(
                     currentSpokenWord = ""
@@ -494,8 +521,59 @@ class StoryViewModel : ViewModel() {
         }
     }
 
+    fun toggleLanguage() {
+        val currentState = _uiState.value
+        if (currentState is UiState.Success) {
+            _uiState.value = currentState.copy(isTranslating = true)
+            viewModelScope.launch {
+                // Если переключаемся на русский и перевода еще нет
+                if (!currentState.isRussian && currentState.russianVersion.isEmpty()) {
+                    try {
+                        val translationPrompt = """
+                            Translate this story to Russian. Keep the same formatting and paragraph breaks.
+                            Mark the translated equivalents of marked words with asterisks.
+                            Do not add any additional formatting or special characters.
+                            
+                            Story to translate:
+                            ${currentState.englishVersion}
+                            
+                            Provide only the Russian translation, no additional text.
+                        """.trimIndent()
+
+                        Log.d(TAG, "Requesting translation")
+                        val response = generativeModel.generateContent(translationPrompt)
+                        var russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
+                        
+                        // Очищаем текст от лишних символов
+                        russianStory = cleanTextForDisplay(russianStory)
+                        
+                        Log.d(TAG, "Translation received")
+                        Log.d(TAG, "Russian story length: ${russianStory.length}")
+
+                        _uiState.value = currentState.copy(
+                            russianVersion = russianStory,
+                            isRussian = true,
+                            isTranslating = false
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error translating story", e)
+                        _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
+                    }
+                } else {
+                    // Просто переключаем язык, если перевод уже есть
+                    delay(500) // Небольшая задержка для анимации
+                    _uiState.value = currentState.copy(
+                        isRussian = !currentState.isRussian,
+                        isTranslating = false
+                    )
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         try {
+            isSmoothReading = false
             stopSpeaking()
             tts?.shutdown()
             tts = null

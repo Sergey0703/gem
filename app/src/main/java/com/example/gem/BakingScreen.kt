@@ -277,56 +277,42 @@ fun StoryScreen(
                                         }
                                     } else {
                                         val text = if (state.isRussian) state.russianVersion else state.englishVersion
+                                        val currentSpokenWord = state.currentSpokenWord
+                                        
                                         val annotatedText = buildAnnotatedString {
-                                            var currentIndex = 0
-                                            val pattern = Regex("""\*\*([^*]+)\*\*|\*([^*]+)\*""")
-                                            
-                                            pattern.findAll(text).forEach { matchResult ->
-                                                // Add text before the match
-                                                append(text.substring(currentIndex, matchResult.range.first))
-                                                
-                                                // Get the word without asterisks
-                                                val word = matchResult.groupValues[1].ifEmpty { matchResult.groupValues[2] }
-                                                
-                                                // Add the word with special style
-                                                withStyle(
-                                                    style = SpanStyle(
-                                                        color = MaterialTheme.colorScheme.primary
-                                                    )
-                                                ) {
-                                                    append(word)
+                                            if (currentSpokenWord.isNotEmpty()) {
+                                                // Разбиваем текст на части до, во время и после текущего предложения
+                                                val startIndex = text.indexOf(currentSpokenWord)
+                                                if (startIndex != -1) {
+                                                    // Текст до текущего предложения
+                                                    append(text.substring(0, startIndex))
+                                                    
+                                                    // Текущее предложение с желтым фоном
+                                                    withStyle(
+                                                        style = SpanStyle(
+                                                            background = Color.Yellow.copy(alpha = 0.3f)
+                                                        )
+                                                    ) {
+                                                        append(currentSpokenWord)
+                                                    }
+                                                    
+                                                    // Текст после текущего предложения
+                                                    append(text.substring(startIndex + currentSpokenWord.length))
+                                                } else {
+                                                    append(text)
                                                 }
-                                                
-                                                currentIndex = matchResult.range.last + 1
-                                            }
-                                            
-                                            // Add remaining text
-                                            if (currentIndex < text.length) {
-                                                append(text.substring(currentIndex))
+                                            } else {
+                                                append(text)
                                             }
                                         }
                                         
-                                        Column {
-                                            Text(
-                                                text = annotatedText,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(top = 8.dp)
-                                            )
-                                            
-                                            if (state.currentSpokenWord.isNotEmpty()) {
-                                                Spacer(modifier = Modifier.height(8.dp))
-                                                Text(
-                                                    text = state.currentSpokenWord,
-                                                    style = MaterialTheme.typography.bodyLarge,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .background(Color(0xFFFFF176))
-                                                        .padding(4.dp)
-                                                )
-                                            }
-                                        }
+                                        Text(
+                                            text = annotatedText,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 8.dp)
+                                        )
                                     }
                                 }
                             }
