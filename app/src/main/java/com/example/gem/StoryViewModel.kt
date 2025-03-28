@@ -65,7 +65,7 @@ class StoryViewModel : ViewModel() {
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-2.0-flash",
-        apiKey = BuildConfig.translationApiKey.also { key ->
+        apiKey = BuildConfig.API_KEY.also { key ->
             Log.d(TAG, "API Key length: ${key.length}")
             if (key.isEmpty()) {
                 Log.e(TAG, "API Key is empty!")
@@ -326,6 +326,14 @@ class StoryViewModel : ViewModel() {
         try {
             if (currentSentenceIndex < sentences.size) {
                 val sentence = sentences[currentSentenceIndex]
+                
+                // Обновляем UI с текущим предложением
+                viewModelScope.launch {
+                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                        currentSpokenWord = sentence
+                    ) ?: _uiState.value
+                }
+                
                 tts?.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
             }
         } catch (e: Exception) {
@@ -451,73 +459,44 @@ class StoryViewModel : ViewModel() {
     }
 
     fun speakTextWithHighlight(context: Context, text: String) {
-        if (isSmoothReading) {
-            // Если уже читаем, останавливаем
-            isSmoothReading = false
-            stopSpeaking()
-            viewModelScope.launch {
-                _uiState.value = when (val currentState = _uiState.value) {
-                    is UiState.Success -> currentState.copy(
-                        currentSpokenWord = ""
-                    )
-                    else -> currentState
-                }
-            }
-            return
-        }
-
-        viewModelScope.launch {
-            isSmoothReading = true
+        try {
+            initializeTTS(context)
             
+            if (isSpeaking) {
+                stopSpeaking()
+                return
+            }
+
+            val cleanedText = cleanTextForSpeech(text)
+            if (cleanedText.isBlank()) {
+                return
+            }
+
             // Устанавливаем язык в зависимости от текущего состояния
             (_uiState.value as? UiState.Success)?.let { state ->
                 setTTSLanguage(state.isRussian)
             }
-            
-            // Разбиваем оригинальный текст на предложения, сохраняя знаки препинания
-            val originalSentences = text.split(Regex("(?<=[.!?])\\s+"))
+
+            // Разбиваем текст на предложения, сохраняя знаки препинания
+            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
                 .filter { it.isNotBlank() }
                 .map { it.trim() }
 
-            // Очищаем текст и разбиваем на предложения для чтения
-            val cleanedText = cleanTextForSpeech(text)
-            val cleanedSentences = cleanedText.split(Regex("(?<=[.!?])\\s+"))
-                .filter { it.isNotBlank() }
-                .map { it.trim() }
-            
-            originalSentences.zip(cleanedSentences).forEach { (originalSentence, cleanedSentence) ->
-                if (!isSmoothReading) return@forEach // Проверяем флаг остановки
-
-                // Обновляем UI с текущим предложением
-                _uiState.value = when (val currentState = _uiState.value) {
-                    is UiState.Success -> currentState.copy(
-                        currentSpokenWord = originalSentence
-                    )
-                    else -> currentState
+            if (sentences.isNotEmpty()) {
+                isSpeaking = true
+                currentSentenceIndex = 0
+                
+                // Обновляем UI с первым предложением
+                viewModelScope.launch {
+                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                        currentSpokenWord = sentences[currentSentenceIndex]
+                    ) ?: _uiState.value
                 }
                 
-                // Говорим предложение
-                withContext(Dispatchers.IO) {
-                    tts?.let { tts ->
-                        tts.speak(cleanedSentence, TextToSpeech.QUEUE_FLUSH, null, "sentence")
-                        // Ждем окончания произношения
-                        var speaking = true
-                        while (speaking && isSmoothReading) {
-                            speaking = tts.isSpeaking
-                            delay(100)
-                        }
-                    }
-                }
+                speakNextSentence()
             }
-            
-            // Очищаем подсветку по завершении
-            isSmoothReading = false
-            _uiState.value = when (val currentState = _uiState.value) {
-                is UiState.Success -> currentState.copy(
-                    currentSpokenWord = ""
-                )
-                else -> currentState
-            }
+        } catch (e: Exception) {
+            _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
         }
     }
 

@@ -36,6 +36,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import com.google.accompanist.flowlayout.FlowRow
+import com.google.accompanist.flowlayout.MainAxisAlignment
+import com.google.accompanist.flowlayout.SizeMode
 
 val words = arrayOf(
     "adventure",
@@ -65,6 +71,67 @@ fun StoryScreen(
     // Инициализация TextToSpeech
     LaunchedEffect(Unit) {
         storyViewModel.initializeTTS(context)
+    }
+
+    // Диалог с информацией о слове
+    if (showWordDialog && selectedWord != null) {
+        AlertDialog(
+            onDismissRequest = { 
+                showWordDialog = false
+                selectedWord = null
+            },
+            title = { Text(selectedWord ?: "") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Транскрипция
+                    Text(
+                        text = wordInfo.first,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    
+                    // Перевод
+                    Text(
+                        text = wordInfo.second,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    // Пример использования
+                    Text(
+                        text = wordInfo.third,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    // Кнопка воспроизведения
+                    IconButton(
+                        onClick = { 
+                            selectedWord?.let { word ->
+                                storyViewModel.speakWord(context, word)
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.VolumeUp,
+                            contentDescription = "Play pronunciation"
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { 
+                    showWordDialog = false
+                    selectedWord = null
+                }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 
     Column(
@@ -279,40 +346,52 @@ fun StoryScreen(
                                         val text = if (state.isRussian) state.russianVersion else state.englishVersion
                                         val currentSpokenWord = state.currentSpokenWord
                                         
-                                        val annotatedText = buildAnnotatedString {
-                                            if (currentSpokenWord.isNotEmpty()) {
-                                                // Разбиваем текст на части до, во время и после текущего предложения
-                                                val startIndex = text.indexOf(currentSpokenWord)
-                                                if (startIndex != -1) {
-                                                    // Текст до текущего предложения
-                                                    append(text.substring(0, startIndex))
+                                        Column {
+                                            FlowRow(
+                                                mainAxisAlignment = MainAxisAlignment.Start,
+                                                mainAxisSize = SizeMode.Expand,
+                                                crossAxisSpacing = 8.dp,
+                                                mainAxisSpacing = 8.dp,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 8.dp)
+                                            ) {
+                                                text.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])")).forEach { sentence ->
+                                                    val shouldHighlight = currentSpokenWord.isNotEmpty() && 
+                                                        sentence.trim() == currentSpokenWord.trim()
                                                     
-                                                    // Текущее предложение с желтым фоном
-                                                    withStyle(
-                                                        style = SpanStyle(
-                                                            background = Color.Yellow.copy(alpha = 0.3f)
-                                                        )
-                                                    ) {
-                                                        append(currentSpokenWord)
+                                                    sentence.split(Regex("\\s+")).forEach { word ->
+                                                        val cleanWord = word.trim().replace(Regex("[^\\p{L}\\p{N}-]"), "")
+                                                        if (cleanWord.isNotEmpty()) {
+                                                            Text(
+                                                                text = word + " ",
+                                                                style = MaterialTheme.typography.bodyLarge,
+                                                                color = MaterialTheme.colorScheme.onSurface,
+                                                                modifier = Modifier
+                                                                    .pointerInput(Unit) {
+                                                                        detectTapGestures(
+                                                                            onLongPress = {
+                                                                                selectedWord = cleanWord
+                                                                                storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
+                                                                                    wordInfo = info
+                                                                                    showWordDialog = true
+                                                                                }
+                                                                            }
+                                                                        )
+                                                                    }
+                                                                    .then(
+                                                                        if (shouldHighlight) {
+                                                                            Modifier.background(Color.Yellow.copy(alpha = 0.3f))
+                                                                        } else {
+                                                                            Modifier
+                                                                        }
+                                                                    )
+                                                            )
+                                                        }
                                                     }
-                                                    
-                                                    // Текст после текущего предложения
-                                                    append(text.substring(startIndex + currentSpokenWord.length))
-                                                } else {
-                                                    append(text)
                                                 }
-                                            } else {
-                                                append(text)
                                             }
                                         }
-                                        
-                                        Text(
-                                            text = annotatedText,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 8.dp)
-                                        )
                                     }
                                 }
                             }
@@ -412,23 +491,6 @@ fun StoryScreen(
                 }
             }
         }
-    }
-
-    // Показываем диалог с информацией о слове
-    if (showWordDialog && selectedWord != null) {
-        WordDialog(
-            word = selectedWord!!,
-            transcription = wordInfo.first,
-            translation = wordInfo.second,
-            example = wordInfo.third,
-            onDismiss = {
-                showWordDialog = false
-                selectedWord = null
-            },
-            onSpeak = {
-                storyViewModel.speakWord(context, selectedWord!!)
-            }
-        )
     }
 }
 
