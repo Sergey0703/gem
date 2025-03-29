@@ -68,6 +68,7 @@ fun StoryScreen(
     var showSelectedWords by remember { mutableStateOf(false) }
     var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
     var highlightedSentence by remember { mutableStateOf("") }
+    var speechRate by remember { mutableStateOf(0.8f) }
 
     // Инициализация TextToSpeech
     LaunchedEffect(Unit) {
@@ -293,32 +294,32 @@ fun StoryScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     TextButton(
-                                        onClick = { showSelectedWords = !showSelectedWords }
+                                        onClick = { showSelectedWords = !showSelectedWords },
+                                        modifier = Modifier.align(Alignment.CenterVertically)
                                     ) {
                                         Text(if (showSelectedWords) "Show story" else "Show words")
                                     }
+                                    Slider(
+                                        value = speechRate,
+                                        onValueChange = { 
+                                            speechRate = it
+                                            storyViewModel.setSpeechRate(it)
+                                        },
+                                        valueRange = 0.4f..1.2f,
+                                        steps = 8,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .align(Alignment.CenterVertically)
+                                    )
                                     IconButton(
-                                        onClick = {
-                                            storyViewModel.speakText(
-                                                context,
-                                                if (state.isRussian) state.russianVersion else state.englishVersion,
-                                                highlightedSentence
-                                            )
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.VolumeUp,
-                                            contentDescription = "Read text"
-                                        )
-                                    }
-                                    FilledTonalIconButton(
                                         onClick = {
                                             storyViewModel.speakTextWithHighlight(
                                                 context,
                                                 if (state.isRussian) state.russianVersion else state.englishVersion,
                                                 highlightedSentence
                                             )
-                                        }
+                                        },
+                                        modifier = Modifier.align(Alignment.CenterVertically)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Filled.VolumeUp,
