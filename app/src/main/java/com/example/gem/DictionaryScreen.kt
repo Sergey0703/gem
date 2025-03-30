@@ -56,46 +56,65 @@ fun DictionaryScreen(
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues)) {
-            when (uiState) {
-                is DictionaryUiState.Loading -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.3f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier.padding(paddingValues)
+        ) {
+            // Поле поиска
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { 
+                    searchQuery = it
+                    viewModel.filterWords(it)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                placeholder = { Text("Поиск слов...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true
+            )
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                when (uiState) {
+                    is DictionaryUiState.Loading -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.3f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator()
-                            Text(
-                                "Импорт словаря...",
-                                color = Color.White
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator()
+                                Text(
+                                    "Импорт словаря...",
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
-                }
-                is DictionaryUiState.Success -> {
-                    LazyColumn {
-                        items((uiState as DictionaryUiState.Success).words) { word ->
-                            WordCard(
-                                word = word,
-                                onPlayClick = { viewModel.playWord(word) }
-                            )
+                    is DictionaryUiState.Success -> {
+                        LazyColumn {
+                            items((uiState as DictionaryUiState.Success).words) { word ->
+                                WordCard(
+                                    word = word,
+                                    onPlayClick = { viewModel.playWord(word) }
+                                )
+                            }
                         }
                     }
-                }
-                is DictionaryUiState.Error -> {
-                    Text(
-                        text = (uiState as DictionaryUiState.Error).message,
-                        modifier = Modifier.padding(16.dp),
-                        color = Color.Red
-                    )
-                }
-                DictionaryUiState.Initial -> {
-                    // Initial state - можно показать приветственное сообщение
+                    is DictionaryUiState.Error -> {
+                        Text(
+                            text = (uiState as DictionaryUiState.Error).message,
+                            modifier = Modifier.padding(16.dp),
+                            color = Color.Red
+                        )
+                    }
+                    DictionaryUiState.Initial -> {
+                        // Initial state - можно показать приветственное сообщение
+                    }
                 }
             }
         }
