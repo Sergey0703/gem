@@ -359,7 +359,7 @@ class StoryViewModel : ViewModel() {
         tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "single_word")
     }
 
-    private fun stopSpeaking() {
+    fun stopSpeaking() {
         try {
             tts?.stop()
             isSpeaking = false

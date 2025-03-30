@@ -1,46 +1,107 @@
 package com.example.gem
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.gem.data.Word
-import com.example.gem.data.WordDatabase
+import com.example.gem.data.WordDao
 import com.opencsv.CSVReader
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.util.Date
+import javax.inject.Inject
 
-class DictionaryViewModel : ViewModel() {
+@HiltViewModel
+class DictionaryViewModel @Inject constructor(
+    private val wordDao: WordDao
+) : ViewModel() {
     private val _uiState = MutableStateFlow<DictionaryUiState>(DictionaryUiState.Initial)
     val uiState: StateFlow<DictionaryUiState> = _uiState.asStateFlow()
 
-    private fun removeQuotes(value: String): String {
-        return value.trim().removeSurrounding("\"")
+    private var searchQuery = ""
+
+    init {
+        loadWords()
     }
 
-    fun importCsv(context: Context, inputStream: java.io.InputStream) {
+    private fun loadWords() {
+        viewModelScope.launch {
+            try {
+                wordDao.getAllWords().collect { words ->
+                    val filteredWords = if (searchQuery.isBlank()) {
+                        words
+                    } else {
+                        words.filter { word ->
+                            word.english.contains(searchQuery, ignoreCase = true) ||
+                            word.russian.contains(searchQuery, ignoreCase = true)
+                        }
+                    }
+                    _uiState.value = DictionaryUiState.Success(filteredWords)
+                }
+            } catch (e: Exception) {
+                _uiState.value = DictionaryUiState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun filterWords(query: String) {
+        searchQuery = query
+        loadWords()
+    }
+
+    fun importCsv(inputStream: InputStream) {
         viewModelScope.launch {
             try {
                 _uiState.value = DictionaryUiState.Loading
-                
                 val reader = CSVReader(InputStreamReader(inputStream))
-                val words = reader.readAll().drop(1).map { row ->
-                    Word(
-                        english = removeQuotes(row[0]),
-                        russian = removeQuotes(row[1]),
-                        transcription = removeQuotes(row[2]),
-                        example = removeQuotes(row[3])
-                    )
-                }
-                
-                val database = WordDatabase.getDatabase(context)
-                database.wordDao().insertWords(words)
-                
-                _uiState.value = DictionaryUiState.Success(words.size)
+                val words = reader.readAll().drop(1) // Skip header row
+                    .mapNotNull { row ->
+                        if (row.size >= 4) {
+                            Word(
+                                english = row[0],
+                                russian = row[1],
+                                transcription = row[2],
+                                example = row[3]
+                            )
+                        } else null
+                    }
+                wordDao.insertWords(words)
+                _uiState.value = DictionaryUiState.Success(words)
+            } catch (e: Exception) {
+                _uiState.value = DictionaryUiState.Error(e.message ?: "Error importing CSV")
+            }
+        }
+    }
+
+    fun addWord(word: Word) {
+        viewModelScope.launch {
+            try {
+                val wordWithDate = word.copy(dateAdded = Date())
+                wordDao.insert(wordWithDate)
             } catch (e: Exception) {
                 _uiState.value = DictionaryUiState.Error(e.message ?: "Unknown error occurred")
+            }
+        }
+    }
+
+    fun updateWord(word: Word) {
+        viewModelScope.launch {
+            try {
+                wordDao.update(word)
+            } catch (e: Exception) {
+                _uiState.value = DictionaryUiState.Error(e.message ?: "Error updating word")
+            }
+        }
+    }
+
+    fun deleteWord(word: Word) {
+        viewModelScope.launch {
+            try {
+                wordDao.delete(word)
+            } catch (e: Exception) {
+                _uiState.value = DictionaryUiState.Error(e.message ?: "Error deleting word")
             }
         }
     }
@@ -49,6 +110,6 @@ class DictionaryViewModel : ViewModel() {
 sealed class DictionaryUiState {
     object Initial : DictionaryUiState()
     object Loading : DictionaryUiState()
-    data class Success(val importedCount: Int) : DictionaryUiState()
+    data class Success(val words: List<Word>) : DictionaryUiState()
     data class Error(val message: String) : DictionaryUiState()
 } 

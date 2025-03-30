@@ -10,6 +10,8 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -60,12 +62,13 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                    }
-                ) { innerPadding ->
+                    },
+                    contentWindowInsets = WindowInsets(0.dp)
+                ) { paddingValues ->
                     NavHost(
                         navController = navController,
                         startDestination = "story",
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(paddingValues)
                     ) {
                         composable("story") {
                             StoryScreen()

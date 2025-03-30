@@ -40,7 +40,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
 import com.google.accompanist.flowlayout.FlowRow
-import com.google.accompanist.flowlayout.MainAxisAlignment
+import com.google.accompanist.flowlayout.FlowCrossAxisAlignment
+import com.google.accompanist.flowlayout.FlowMainAxisAlignment
 import com.google.accompanist.flowlayout.SizeMode
 
 val words = arrayOf(
@@ -352,13 +353,12 @@ fun StoryScreen(
                                         
                                         Column {
                                             FlowRow(
-                                                mainAxisAlignment = MainAxisAlignment.Start,
-                                                mainAxisSize = SizeMode.Expand,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                mainAxisAlignment = FlowMainAxisAlignment.Start,
+                                                crossAxisAlignment = FlowCrossAxisAlignment.Start,
+                                                mainAxisSize = SizeMode.Wrap,
                                                 crossAxisSpacing = 8.dp,
-                                                mainAxisSpacing = 8.dp,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(top = 8.dp)
+                                                mainAxisSpacing = 8.dp
                                             ) {
                                                 text.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])")).forEach { sentence ->
                                                     val shouldHighlight = (currentSpokenWord.isNotEmpty() && 
