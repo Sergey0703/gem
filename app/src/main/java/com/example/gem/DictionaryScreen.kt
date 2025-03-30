@@ -1,6 +1,7 @@
 package com.example.gem
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -21,30 +22,32 @@ import java.io.InputStream
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DictionaryScreen(
-    viewModel: DictionaryViewModel = hiltViewModel()
+    viewModel: DictionaryViewModel,
+    onImportClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    val uiState by viewModel.uiState.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            context.contentResolver.openInputStream(it)?.use { inputStream ->
-                viewModel.importCsv(inputStream)
-            }
-        }
-    }
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dictionary") },
+                title = {
+                    Column {
+                        Text("Dictionary")
+                        // Показываем количество слов, если есть
+                        if (uiState is DictionaryUiState.Success) {
+                            Text(
+                                text = "Words: ${(uiState as DictionaryUiState.Success).words.size}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                },
                 actions = {
-                    IconButton(onClick = { filePickerLauncher.launch("text/csv") }) {
-                        Icon(Icons.Default.FileUpload, contentDescription = "Import CSV")
+                    IconButton(onClick = onImportClick) {
+                        Icon(Icons.Default.Upload, contentDescription = "Import dictionary")
                     }
                 }
             )
@@ -60,7 +63,7 @@ fun DictionaryScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Search bar
+            // Поле поиска
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { 
@@ -71,20 +74,11 @@ fun DictionaryScreen(
                     .fillMaxWidth()
                     .padding(16.dp),
                 placeholder = { Text("Search words...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                singleLine = true
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
             )
 
-            // Content
+            // Состояние UI
             when (uiState) {
-                is DictionaryUiState.Initial -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
                 is DictionaryUiState.Loading -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -94,17 +88,18 @@ fun DictionaryScreen(
                     }
                 }
                 is DictionaryUiState.Success -> {
-                    val words = (uiState as DictionaryUiState.Success).words
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(words) { word ->
+                        items(
+                            items = (uiState as DictionaryUiState.Success).words,
+                            key = { it.id }
+                        ) { word ->
                             WordCard(
                                 word = word,
-                                onEdit = { /* TODO: Implement edit */ },
-                                onDelete = { viewModel.deleteWord(word) }
+                                onPlayClick = { viewModel.playWord(word) }
                             )
                         }
                     }
@@ -120,38 +115,88 @@ fun DictionaryScreen(
                         )
                     }
                 }
+                DictionaryUiState.Initial -> {
+                    // Начальное состояние, можно показать приветственное сообщение
+                }
             }
         }
-    }
 
-    if (showAddDialog) {
-        AddWordDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { english, russian, transcription, example ->
-                viewModel.addWord(
-                    Word(
-                        english = english,
-                        russian = russian,
-                        transcription = transcription,
-                        example = example
-                    )
-                )
-                showAddDialog = false
-            }
-        )
+        if (showAddDialog) {
+            var english by remember { mutableStateOf("") }
+            var russian by remember { mutableStateOf("") }
+            var transcription by remember { mutableStateOf("") }
+            var example by remember { mutableStateOf("") }
+
+            AlertDialog(
+                onDismissRequest = { showAddDialog = false },
+                title = { Text("Add new word") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = english,
+                            onValueChange = { english = it },
+                            label = { Text("English") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = russian,
+                            onValueChange = { russian = it },
+                            label = { Text("Russian") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = transcription,
+                            onValueChange = { transcription = it },
+                            label = { Text("Transcription") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = example,
+                            onValueChange = { example = it },
+                            label = { Text("Example") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.addWord(
+                                Word(
+                                    english = english,
+                                    russian = russian,
+                                    transcription = transcription,
+                                    example = example
+                                )
+                            )
+                            showAddDialog = false
+                        }
+                    ) {
+                        Text("Add")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WordCard(
     word: Word,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onPlayClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onEdit
+        modifier = modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier
@@ -163,98 +208,40 @@ fun WordCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column {
                     Text(
                         text = word.english,
                         style = MaterialTheme.typography.titleMedium
                     )
-                    Text(
-                        text = word.russian,
-                        style = MaterialTheme.typography.bodyMedium
+                    if (word.transcription.isNotBlank()) {
+                        Text(
+                            text = word.transcription,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onPlayClick) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play pronunciation",
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete")
-                }
             }
-            if (word.transcription.isNotEmpty()) {
-                Text(
-                    text = word.transcription,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (word.example.isNotEmpty()) {
+            Text(
+                text = word.russian,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            if (word.example.isNotBlank()) {
                 Text(
                     text = word.example,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 4.dp)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddWordDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (String, String, String, String) -> Unit
-) {
-    var english by remember { mutableStateOf("") }
-    var russian by remember { mutableStateOf("") }
-    var transcription by remember { mutableStateOf("") }
-    var example by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add new word") },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = english,
-                    onValueChange = { english = it },
-                    label = { Text("English") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = russian,
-                    onValueChange = { russian = it },
-                    label = { Text("Russian") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = transcription,
-                    onValueChange = { transcription = it },
-                    label = { Text("Transcription") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = example,
-                    onValueChange = { example = it },
-                    label = { Text("Example") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onConfirm(english, russian, transcription, example)
-                    onDismiss()
-                },
-                enabled = english.isNotBlank() && russian.isNotBlank()
-            ) {
-                Text("Add")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 } 
