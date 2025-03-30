@@ -10,22 +10,22 @@ import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.gem.ui.theme.GemTheme
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             GemTheme {
-                val navController = rememberNavController()
                 var selectedItem by remember { mutableStateOf(0) }
                 val items = listOf("Story", "Dictionary")
+                val navController = rememberNavController()
 
                 Scaffold(
                     bottomBar = {
@@ -62,8 +62,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                    },
-                    contentWindowInsets = WindowInsets(0.dp)
+                    }
                 ) { paddingValues ->
                     NavHost(
                         navController = navController,
