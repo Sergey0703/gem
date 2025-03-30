@@ -68,7 +68,7 @@ class DictionaryViewModel @Inject constructor(
                         } else null
                     }
                 wordDao.insertWords(words)
-                _uiState.value = DictionaryUiState.Success(words)
+                loadWords() // Перезагружаем список слов
             } catch (e: Exception) {
                 _uiState.value = DictionaryUiState.Error(e.message ?: "Error importing CSV")
             }
@@ -78,10 +78,10 @@ class DictionaryViewModel @Inject constructor(
     fun addWord(word: Word) {
         viewModelScope.launch {
             try {
-                val wordWithDate = word.copy(dateAdded = Date())
-                wordDao.insert(wordWithDate)
+                wordDao.insertWord(word)
+                loadWords() // Перезагружаем список слов
             } catch (e: Exception) {
-                _uiState.value = DictionaryUiState.Error(e.message ?: "Unknown error occurred")
+                _uiState.value = DictionaryUiState.Error(e.message ?: "Error adding word")
             }
         }
     }
@@ -89,7 +89,8 @@ class DictionaryViewModel @Inject constructor(
     fun updateWord(word: Word) {
         viewModelScope.launch {
             try {
-                wordDao.update(word)
+                wordDao.updateWord(word)
+                loadWords() // Перезагружаем список слов
             } catch (e: Exception) {
                 _uiState.value = DictionaryUiState.Error(e.message ?: "Error updating word")
             }
@@ -99,7 +100,8 @@ class DictionaryViewModel @Inject constructor(
     fun deleteWord(word: Word) {
         viewModelScope.launch {
             try {
-                wordDao.delete(word)
+                wordDao.deleteWord(word)
+                loadWords() // Перезагружаем список слов
             } catch (e: Exception) {
                 _uiState.value = DictionaryUiState.Error(e.message ?: "Error deleting word")
             }
