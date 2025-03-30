@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.gem.data.Word
 import java.io.InputStream
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,20 +36,16 @@ fun DictionaryScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Dictionary")
-                        // Показываем количество слов, если есть
-                        if (uiState is DictionaryUiState.Success) {
-                            Text(
-                                text = "Words: ${(uiState as DictionaryUiState.Success).words.size}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                    when (val state = uiState) {
+                        is DictionaryUiState.Success -> Text("Словарь (${state.words.size} слов)")
+                        DictionaryUiState.Initial,
+                        DictionaryUiState.Loading,
+                        is DictionaryUiState.Error -> Text("Словарь")
                     }
                 },
                 actions = {
                     IconButton(onClick = onImportClick) {
-                        Icon(Icons.Default.Upload, contentDescription = "Import dictionary")
+                        Icon(Icons.Default.FileUpload, contentDescription = "Import")
                     }
                 }
             )
@@ -57,46 +55,31 @@ fun DictionaryScreen(
                 Icon(Icons.Default.Add, contentDescription = "Add word")
             }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            // Поле поиска
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { 
-                    searchQuery = it
-                    viewModel.filterWords(it)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                placeholder = { Text("Search words...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
-            )
-
-            // Состояние UI
+    ) { paddingValues ->
+        Box(modifier = Modifier.padding(paddingValues)) {
             when (uiState) {
                 is DictionaryUiState.Loading -> {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.3f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                "Импорт словаря...",
+                                color = Color.White
+                            )
+                        }
                     }
                 }
                 is DictionaryUiState.Success -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(
-                            items = (uiState as DictionaryUiState.Success).words,
-                            key = { it.id }
-                        ) { word ->
+                    LazyColumn {
+                        items((uiState as DictionaryUiState.Success).words) { word ->
                             WordCard(
                                 word = word,
                                 onPlayClick = { viewModel.playWord(word) }
@@ -105,18 +88,14 @@ fun DictionaryScreen(
                     }
                 }
                 is DictionaryUiState.Error -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = (uiState as DictionaryUiState.Error).message,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                    Text(
+                        text = (uiState as DictionaryUiState.Error).message,
+                        modifier = Modifier.padding(16.dp),
+                        color = Color.Red
+                    )
                 }
                 DictionaryUiState.Initial -> {
-                    // Начальное состояние, можно показать приветственное сообщение
+                    // Initial state - можно показать приветственное сообщение
                 }
             }
         }
@@ -188,57 +167,52 @@ fun DictionaryScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WordCard(
     word: Word,
-    onPlayClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onPlayClick: () -> Unit
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+        elevation = CardDefaults.cardElevation()
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+            modifier = Modifier.padding(16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = word.english,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    if (word.transcription.isNotBlank()) {
-                        Text(
-                            text = word.transcription,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = word.english,
+                    style = MaterialTheme.typography.titleLarge
+                )
                 IconButton(onClick = onPlayClick) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play pronunciation",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play")
                 }
+            }
+            if (word.transcription.isNotEmpty()) {
+                Text(
+                    text = word.transcription,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
             Text(
                 text = word.russian,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp)
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 8.dp)
             )
-            if (word.example.isNotBlank()) {
+            if (word.example.isNotEmpty()) {
                 Text(
                     text = word.example,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray,
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
