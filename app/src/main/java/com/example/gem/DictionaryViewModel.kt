@@ -122,89 +122,56 @@ class DictionaryViewModel @Inject constructor(
     fun importCsv(inputStream: InputStream) {
         viewModelScope.launch {
             try {
-                Log.d(TAG, "Starting CSV import")
                 _uiState.value = DictionaryUiState.Loading
+                Log.d(TAG, "Starting CSV import")
 
                 val parser = CSVParserBuilder()
                     .withSeparator(';')
                     .build()
-
                 val reader = CSVReaderBuilder(InputStreamReader(inputStream))
                     .withCSVParser(parser)
                     .build()
-
-                Log.d(TAG, "CSV Reader created")
 
                 val allRows = reader.readAll()
                 Log.d(TAG, "Read ${allRows.size} rows from CSV")
 
                 if (allRows.isEmpty()) {
                     Log.w(TAG, "CSV file is empty")
-                    _uiState.value = DictionaryUiState.Error("CSV файл пуст")
+                    _uiState.value = DictionaryUiState.Error("Файл пуст")
                     return@launch
                 }
 
-                // Обрабатываем строки
                 val words = allRows.mapNotNull { row: Array<String> ->
                     try {
-                        if (row.size >= 2) { // Нам нужны как минимум английское и русское слова
-                            Log.d(TAG, "Processing row: ${row.joinToString(", ")}")
-                            
-                            // Находим транскрипцию - она обычно в формате /ˈtekst/ или [tekst]
-                            val transcriptionIndex = row.indexOfFirst { field: String ->
-                                field.trim().matches(Regex("[\\[/].*[\\]/]"))
-                            }
-                            
-                            // Если транскрипция не найдена, используем пустую строку
-                            val transcription = if (transcriptionIndex != -1) {
-                                cleanString(row[transcriptionIndex])
-                            } else {
-                                ""
-                            }
-
-                            // Ищем пример использования после транскрипции
-                            val exampleIndex = if (transcriptionIndex != -1) {
-                                transcriptionIndex + 1
-                            } else {
-                                3 // Если транскрипция не найдена, пробуем взять четвертое поле
-                            }
-
-                            Word(
-                                english = cleanString(row[0]),
-                                russian = cleanString(row[1]),
-                                transcription = transcription,
-                                example = cleanString(row.getOrNull(exampleIndex) ?: "")
-                            )
-                        } else {
-                            Log.w(TAG, "Row has less than 2 fields: ${row.joinToString(", ")}")
-                            null
+                        if (row.size < 2) {
+                            Log.w(TAG, "Invalid row: ${row.joinToString()}")
+                            return@mapNotNull null
                         }
+
+                        val english = cleanString(row[0])
+                        val russian = cleanString(row[1])
+                        val transcription = if (row.size >= 4) cleanString(row[3]) else ""
+                        val example = if (row.size >= 5) cleanString(row[4]) else ""
+
+                        Log.d(TAG, "Processing row: $english - $russian - $transcription - $example")
+                        Word(
+                            english = english,
+                            russian = russian,
+                            transcription = transcription,
+                            example = example
+                        )
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error processing row: ${row.joinToString(", ")}", e)
+                        Log.e(TAG, "Error processing row: ${row.joinToString()}", e)
                         null
                     }
                 }
 
-                Log.d(TAG, "Processed ${words.size} valid words")
-
-                if (words.isEmpty()) {
-                    Log.w(TAG, "No valid words found in CSV")
-                    _uiState.value = DictionaryUiState.Error("Не найдено корректных слов в CSV файле")
-                    return@launch
-                }
-
-                try {
-                    Log.d(TAG, "Inserting words into database")
-                    wordDao.insertWords(words)
-                    Log.d(TAG, "Successfully inserted ${words.size} words")
-                    loadWords() // Перезагружаем список слов
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error inserting words into database", e)
-                    _uiState.value = DictionaryUiState.Error("Ошибка при сохранении слов: ${e.message}")
-                }
+                Log.d(TAG, "Successfully processed ${words.size} words")
+                wordDao.insertWords(words)
+                loadWords() // Перезагружаем список слов вместо прямого установки состояния
             } catch (e: Exception) {
-                Log.e(TAG, "Error during CSV import", e)
-                _uiState.value = DictionaryUiState.Error("Ошибка при импорте CSV: ${e.message}")
+                Log.e(TAG, "Error importing CSV", e)
+                _uiState.value = DictionaryUiState.Error("Ошибка при импорте: ${e.message}")
             }
         }
     }

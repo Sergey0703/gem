@@ -75,7 +75,7 @@ fun DictionaryScreen(
             )
 
             Box(modifier = Modifier.fillMaxSize()) {
-                when (uiState) {
+                when (val state = uiState) {
                     is DictionaryUiState.Loading -> {
                         Box(
                             modifier = Modifier
@@ -97,7 +97,7 @@ fun DictionaryScreen(
                     }
                     is DictionaryUiState.Success -> {
                         LazyColumn {
-                            items((uiState as DictionaryUiState.Success).words) { word ->
+                            items(state.words) { word ->
                                 WordCard(
                                     word = word,
                                     onPlayClick = { viewModel.playWord(word) }
@@ -107,7 +107,7 @@ fun DictionaryScreen(
                     }
                     is DictionaryUiState.Error -> {
                         Text(
-                            text = (uiState as DictionaryUiState.Error).message,
+                            text = state.message,
                             modifier = Modifier.padding(16.dp),
                             color = Color.Red
                         )
