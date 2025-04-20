@@ -27,7 +27,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -39,6 +38,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.flowlayout.FlowRow
 import com.google.accompanist.flowlayout.FlowCrossAxisAlignment
 import com.google.accompanist.flowlayout.FlowMainAxisAlignment
@@ -59,11 +59,11 @@ val words = arrayOf(
 
 @Composable
 fun StoryScreen(
-    storyViewModel: StoryViewModel = viewModel()
+    storyViewModel: StoryViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val uiState by storyViewModel.uiState.collectAsState()
-    
+
     var selectedWord by remember { mutableStateOf<String?>(null) }
     var showWordDialog by remember { mutableStateOf(false) }
     var showSelectedWords by remember { mutableStateOf(false) }
@@ -79,7 +79,7 @@ fun StoryScreen(
     // Диалог с информацией о слове
     if (showWordDialog && selectedWord != null) {
         AlertDialog(
-            onDismissRequest = { 
+            onDismissRequest = {
                 showWordDialog = false
                 selectedWord = null
             },
@@ -95,14 +95,14 @@ fun StoryScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
-                    
+
                     // Перевод
                     Text(
                         text = wordInfo.second,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    
+
                     // Пример использования
                     Text(
                         text = wordInfo.third,
@@ -112,7 +112,7 @@ fun StoryScreen(
 
                     // Кнопка воспроизведения
                     IconButton(
-                        onClick = { 
+                        onClick = {
                             selectedWord?.let { word ->
                                 storyViewModel.speakWord(context, word)
                             }
@@ -127,7 +127,7 @@ fun StoryScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { 
+                TextButton(onClick = {
                     showWordDialog = false
                     selectedWord = null
                 }) {
@@ -302,7 +302,7 @@ fun StoryScreen(
                                     }
                                     Slider(
                                         value = speechRate,
-                                        onValueChange = { 
+                                        onValueChange = {
                                             speechRate = it
                                             storyViewModel.setSpeechRate(it)
                                         },
@@ -350,7 +350,7 @@ fun StoryScreen(
                                     } else {
                                         val text = if (state.isRussian) state.russianVersion else state.englishVersion
                                         val currentSpokenWord = state.currentSpokenWord
-                                        
+
                                         Column {
                                             FlowRow(
                                                 modifier = Modifier.fillMaxWidth(),
@@ -361,10 +361,10 @@ fun StoryScreen(
                                                 mainAxisSpacing = 8.dp
                                             ) {
                                                 text.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])")).forEach { sentence ->
-                                                    val shouldHighlight = (currentSpokenWord.isNotEmpty() && 
-                                                        sentence.trim() == currentSpokenWord.trim()) ||
-                                                        sentence.trim() == highlightedSentence.trim()
-                                                    
+                                                    val shouldHighlight = (currentSpokenWord.isNotEmpty() &&
+                                                            sentence.trim() == currentSpokenWord.trim()) ||
+                                                            sentence.trim() == highlightedSentence.trim()
+
                                                     sentence.split(Regex("\\s+")).forEach { word ->
                                                         val cleanWord = word.trim().replace(Regex("[^\\p{L}\\p{N}-]"), "")
                                                         if (cleanWord.isNotEmpty()) {

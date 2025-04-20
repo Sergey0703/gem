@@ -33,6 +33,6 @@ interface WordDao {
     @Query("SELECT * FROM words ORDER BY rating DESC LIMIT :limit")
     fun getTopWords(limit: Int): Flow<List<Word>>
 
-    @Query("SELECT * FROM words WHERE lastUsed IS NULL OR lastUsed < :date ORDER BY lastUsed ASC LIMIT :limit")
+    @Query("SELECT * FROM words WHERE lastUsed IS NULL OR lastUsed < :date ORDER BY lastUsed ASC, RANDOM() LIMIT :limit")
     fun getWordsToReview(date: Date, limit: Int): Flow<List<Word>>
-} 
+}

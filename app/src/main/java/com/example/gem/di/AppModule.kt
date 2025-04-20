@@ -2,10 +2,14 @@ package com.example.gem.di
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import com.example.gem.StoryViewModel
+import com.example.gem.data.WordDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.components.ViewModelComponent
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.android.scopes.ViewModelScoped
 import dagger.hilt.components.SingletonComponent
 import java.util.*
 import javax.inject.Singleton
@@ -27,4 +31,4 @@ object AppModule {
             }
         }
     }
-} 
+}

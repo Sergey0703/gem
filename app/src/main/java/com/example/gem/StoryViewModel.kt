@@ -6,17 +6,25 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.gem.data.Word
+import com.example.gem.data.WordDao
 import com.google.ai.client.generativeai.GenerativeModel
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.util.*
 import kotlinx.coroutines.withContext
+import java.util.*
+import javax.inject.Inject
 
-class StoryViewModel : ViewModel() {
+@HiltViewModel
+class StoryViewModel @Inject constructor(
+    private val wordDao: WordDao
+) : ViewModel() {
     private val TAG = "StoryViewModel"
     private val _uiState: MutableStateFlow<UiState> = MutableStateFlow(UiState.Initial)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -28,40 +36,12 @@ class StoryViewModel : ViewModel() {
     private var sentences = listOf<String>()
     private var speechRate = 1.0f
     private var currentLanguage = "en"
-    private var isSmoothReading = false // Добавляем флаг для чтения по предложениям
+    private var isSmoothReading = false
 
-    // Список из 300 слов для генерации истории
-    private val availableWords = listOf(
-        "adventure", "mystery", "rainbow", "dragon", "treasure", "magic", "journey", "forest", "castle", "ocean",
-        "mountain", "river", "desert", "island", "beach", "cave", "bridge", "tower", "garden", "park",
-        "city", "village", "house", "school", "library", "museum", "shop", "market", "restaurant", "cafe",
-        "book", "pen", "paper", "map", "key", "door", "window", "chair", "table", "lamp",
-        "clock", "phone", "computer", "camera", "radio", "television", "music", "song", "dance", "art",
-        "color", "red", "blue", "green", "yellow", "purple", "orange", "pink", "brown", "black",
-        "white", "gray", "gold", "silver", "bronze", "stone", "wood", "metal", "glass", "plastic",
-        "flower", "tree", "grass", "leaf", "branch", "root", "seed", "fruit", "vegetable", "food",
-        "water", "fire", "earth", "air", "sun", "moon", "star", "cloud", "rain", "snow",
-        "wind", "storm", "thunder", "lightning", "fog", "mist", "ice", "frost", "dew", "steam",
-        "bird", "fish", "cat", "dog", "horse", "lion", "tiger", "bear", "wolf", "fox",
-        "rabbit", "deer", "elephant", "giraffe", "zebra", "monkey", "penguin", "owl", "eagle", "swan",
-        "butterfly", "bee", "ant", "spider", "snake", "frog", "turtle", "crab", "shark", "whale",
-        "person", "child", "parent", "friend", "teacher", "doctor", "artist", "writer", "singer", "dancer",
-        "king", "queen", "prince", "princess", "knight", "wizard", "witch", "giant", "dwarf", "elf",
-        "time", "day", "night", "morning", "evening", "spring", "summer", "autumn", "winter", "week",
-        "month", "year", "hour", "minute", "second", "today", "tomorrow", "yesterday", "now", "later",
-        "happy", "sad", "angry", "scared", "excited", "tired", "sleepy", "hungry", "thirsty", "cold",
-        "hot", "warm", "cool", "wet", "dry", "clean", "dirty", "new", "old", "young",
-        "big", "small", "tall", "short", "long", "wide", "narrow", "heavy", "light", "fast",
-        "slow", "loud", "quiet", "bright", "dark", "sweet", "sour", "salty", "spicy", "fresh",
-        "walk", "run", "jump", "swim", "fly", "climb", "dance", "sing", "talk", "laugh",
-        "cry", "smile", "frown", "wave", "nod", "shake", "point", "touch", "feel", "see",
-        "hear", "smell", "taste", "think", "know", "learn", "remember", "forget", "understand", "believe",
-        "want", "need", "like", "love", "hate", "hope", "wish", "dream", "plan", "try",
-        "start", "stop", "finish", "begin", "end", "continue", "change", "grow", "help", "work",
-        "play", "study", "read", "write", "draw", "paint", "build", "make", "create", "design",
-        "find", "lose", "get", "give", "take", "bring", "carry", "hold", "drop", "throw",
-        "catch", "kick", "hit", "push", "pull", "lift", "move", "turn", "bend", "stretch"
-    )
+    // Количество слов, которое будет использовано для каждой истории
+    private val STORY_WORDS_COUNT = 300
+    // Максимальное количество слов, которое будет получено из базы данных
+    private val MAX_WORDS_TO_FETCH = 300
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-2.0-flash",
@@ -132,13 +112,45 @@ class StoryViewModel : ViewModel() {
         }
     }
 
+    private suspend fun getWordsForStory(): List<String> {
+        try {
+            // Получаем слова из базы данных, отсортированные по дате последнего использования (сначала с NULL)
+            val words = wordDao.getWordsToReview(Date(), MAX_WORDS_TO_FETCH).first()
+
+            if (words.isEmpty()) {
+                throw Exception("Dictionary is empty. Please add some words first.")
+            }
+
+            // Преобразуем список Word в список строк английских слов
+            val englishWords = words.map { it.english }
+
+            // Перемешиваем список слов для разнообразия историй
+            val shuffledWords = englishWords.shuffled()
+
+            // Выбираем подмножество слов для истории
+            val selectedWords = if (shuffledWords.size <= STORY_WORDS_COUNT) {
+                shuffledWords
+            } else {
+                shuffledWords.subList(0, STORY_WORDS_COUNT)
+            }
+
+            return selectedWords
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting words for story", e)
+            throw e
+        }
+    }
+
     private suspend fun generateStory(prompt: String, maxAttempts: Int = 5): Triple<String, String, List<String>> {
         try {
+            // Получаем слова из словаря
+            val availableWords = getWordsForStory()
+
             _uiState.value = UiState.Loading(
                 maxAttempts = maxAttempts,
                 totalWords = availableWords.size
             )
-            Log.d(TAG, "Starting story generation")
+            Log.d(TAG, "Starting story generation with words: ${availableWords.joinToString(", ")}")
 
             var attempt = 1
             var lastMissingWords = availableWords
@@ -194,12 +206,12 @@ class StoryViewModel : ViewModel() {
                 Log.d(TAG, "Generating story - Attempt $attempt of $maxAttempts")
                 val response = generativeModel.generateContent(storyPrompt)
                 englishStory = response.text?.trim() ?: throw Exception("Empty response from API")
-                
+
                 // Проверяем использование всех слов
                 val usedWords = availableWords.filter { word ->
                     englishStory.contains("*$word*", ignoreCase = true)
                 }
-                
+
                 // Не все слова использованы, готовимся к следующей попытке
                 lastMissingWords = availableWords.filter { word ->
                     !englishStory.contains("*$word*", ignoreCase = true)
@@ -214,11 +226,11 @@ class StoryViewModel : ViewModel() {
                     storyLength = englishStory.length,
                     missingWords = lastMissingWords
                 )
-                
+
                 Log.d(TAG, "Story generated - Attempt $attempt")
                 Log.d(TAG, "English story length: ${englishStory.length}")
                 Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
-                
+
                 if (lastMissingWords.isEmpty()) {
                     // Все слова использованы, обновляем состояние и завершаем
                     _uiState.value = UiState.Success(
@@ -230,10 +242,14 @@ class StoryViewModel : ViewModel() {
                         generationTime = 0.0
                     )
                     Log.d(TAG, "Story generation completed successfully")
+
+                    // Обновляем даты использования слов
+                    updateWordUsageDates(availableWords)
+
                     return Triple(englishStory, "", availableWords)
                 } else {
                     Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
-                    
+
                     if (attempt == maxAttempts && lastMissingWords.size >= errorThreshold) {
                         throw Exception("Failed to use enough words after $maxAttempts attempts. Missing ${lastMissingWords.size} words (threshold: $errorThreshold).")
                     } else if (attempt == maxAttempts) {
@@ -247,10 +263,15 @@ class StoryViewModel : ViewModel() {
                             generationTime = 0.0
                         )
                         Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
+
+                        // Обновляем даты использования только для использованных слов
+                        val usedWordsSet = usedWords.toSet()
+                        updateWordUsageDates(usedWordsSet.toList())
+
                         return Triple(englishStory, "", availableWords)
                     }
                 }
-                
+
                 attempt++
             }
         } catch (e: Exception) {
@@ -259,6 +280,28 @@ class StoryViewModel : ViewModel() {
             return Triple("", "", listOf())
         }
         return Triple("", "", listOf())
+    }
+
+    // Обновляем даты последнего использования слов
+    private suspend fun updateWordUsageDates(words: List<String>) {
+        try {
+            withContext(Dispatchers.IO) {
+                // Получаем все слова из базы данных
+                val allWords = wordDao.getAllWords().first()
+                // Создаем карту английское слово -> id
+                val wordIdMap = allWords.associate { it.english.lowercase() to it.id }
+
+                // Для каждого слова в истории обновляем дату последнего использования
+                words.forEach { word ->
+                    wordIdMap[word.lowercase()]?.let { wordId ->
+                        wordDao.updateWordUsage(wordId, Date())
+                        Log.d(TAG, "Updated usage date for word: $word (ID: $wordId)")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating word usage dates", e)
+        }
     }
 
     private fun cleanTextForDisplay(text: String): String {
@@ -292,7 +335,7 @@ class StoryViewModel : ViewModel() {
     fun speakText(context: Context, text: String, highlightedSentence: String = "") {
         try {
             initializeTTS(context)
-            
+
             if (isSpeaking) {
                 stopSpeaking()
                 return
@@ -315,7 +358,7 @@ class StoryViewModel : ViewModel() {
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
-                
+
                 // Определяем начальный индекс
                 currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
                     sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
@@ -334,14 +377,14 @@ class StoryViewModel : ViewModel() {
         try {
             if (currentSentenceIndex < sentences.size) {
                 val sentence = sentences[currentSentenceIndex]
-                
+
                 // Обновляем UI с текущим предложением
                 viewModelScope.launch {
                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = sentence
                     ) ?: _uiState.value
                 }
-                
+
                 tts?.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
             }
         } catch (e: Exception) {
@@ -393,22 +436,22 @@ class StoryViewModel : ViewModel() {
             
             Make sure the transcription uses proper IPA symbols and is enclosed in square brackets.
         """.trimIndent()
-        
+
         return try {
             val response = generativeModel.generateContent(prompt).text?.trim() ?: ""
-            
+
             // Parse the response
             val transcription = response.substringAfter("TRANSCRIPTION: ")
                 .substringBefore("\n")
                 .trim()
-            
+
             val translation = response.substringAfter("TRANSLATION: ")
                 .substringBefore("\n")
                 .trim()
-            
+
             val example = response.substringAfter("EXAMPLE: ")
                 .trim()
-            
+
             Triple(transcription, translation, example)
         } catch (e: Exception) {
             Log.e("StoryViewModel", "Error getting word info: ${e.message}")
@@ -428,7 +471,7 @@ class StoryViewModel : ViewModel() {
     fun speakTextSmooth(context: Context, text: String) {
         try {
             initializeTTS(context)
-            
+
             if (isSpeaking) {
                 stopSpeaking()
                 return
@@ -469,7 +512,7 @@ class StoryViewModel : ViewModel() {
     fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "") {
         try {
             initializeTTS(context)
-            
+
             if (isSpeaking) {
                 stopSpeaking()
                 return
@@ -492,21 +535,21 @@ class StoryViewModel : ViewModel() {
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
-                
+
                 // Определяем начальный индекс
                 currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
                     sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
                 } else {
                     0
                 }
-                
+
                 // Обновляем UI с первым предложением
                 viewModelScope.launch {
                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = sentences[currentSentenceIndex]
                     ) ?: _uiState.value
                 }
-                
+
                 speakNextSentence()
             }
         } catch (e: Exception) {
@@ -536,10 +579,10 @@ class StoryViewModel : ViewModel() {
                         Log.d(TAG, "Requesting translation")
                         val response = generativeModel.generateContent(translationPrompt)
                         var russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
-                        
+
                         // Очищаем текст от лишних символов
                         russianStory = cleanTextForDisplay(russianStory)
-                        
+
                         Log.d(TAG, "Translation received")
                         Log.d(TAG, "Russian story length: ${russianStory.length}")
 
@@ -575,4 +618,4 @@ class StoryViewModel : ViewModel() {
         }
         super.onCleared()
     }
-} 
+}
