@@ -70,10 +70,72 @@ fun StoryScreen(
     var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
     var highlightedSentence by remember { mutableStateOf("") }
     var speechRate by remember { mutableStateOf(0.8f) }
+    var isGenerating by remember { mutableStateOf(false) }
+
+    // Следим за состоянием генерации
+    LaunchedEffect(uiState) {
+        isGenerating = uiState is UiState.Loading
+    }
 
     // Инициализация TextToSpeech
     LaunchedEffect(Unit) {
         storyViewModel.initializeTTS(context)
+    }
+
+    // Спиннер на весь экран во время генерации
+    if (isGenerating) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .widthIn(max = 300.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(56.dp)
+                    )
+
+                    Text(
+                        text = "Generating story...",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    if (uiState is UiState.Loading) {
+                        val loadingState = uiState as UiState.Loading
+                        if (loadingState.attempt > 0) {
+                            Text(
+                                text = "Attempt ${loadingState.attempt}/${loadingState.maxAttempts}",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            if (loadingState.usedWordsCount > 0) {
+                                Text(
+                                    text = "Used ${loadingState.usedWordsCount} of ${loadingState.totalWords} words",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+
+                            LinearProgressIndicator(
+                                progress = loadingState.attempt.toFloat() / loadingState.maxAttempts,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Диалог с информацией о слове
@@ -148,7 +210,8 @@ fun StoryScreen(
 
         when (val state = uiState) {
             is UiState.Loading -> {
-                Card(
+                // Закомментировали верхнюю карточку с прогрессом, так как теперь используем модальное окно
+                /*Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -192,7 +255,7 @@ fun StoryScreen(
                             progress = state.attempt.toFloat() / state.maxAttempts
                         )
                     }
-                }
+                }*/
             }
             is UiState.Success -> {
                 Card(
