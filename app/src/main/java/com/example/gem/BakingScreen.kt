@@ -26,6 +26,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -41,12 +42,19 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.flowlayout.FlowRow
 import com.google.accompanist.flowlayout.FlowCrossAxisAlignment
 import com.google.accompanist.flowlayout.FlowMainAxisAlignment
 import com.google.accompanist.flowlayout.SizeMode
+import androidx.compose.ui.draw.alpha
 
 val words = arrayOf(
     "adventure",
@@ -78,6 +86,9 @@ fun StoryScreen(
     var highlightedSentence by remember { mutableStateOf("") }
     var speechRate by remember { mutableStateOf(1.0f) }
     var isGenerating by remember { mutableStateOf(false) }
+
+    // Создаем состояние скролла, чтобы иметь к нему доступ для отображения скроллбара
+    val scrollState = rememberScrollState()
 
     // Следим за состоянием генерации
     LaunchedEffect(uiState) {
@@ -290,7 +301,6 @@ fun StoryScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(16.dp)
-                        .verticalScroll(rememberScrollState())
                 ) {
                     // Story display card
                     Card(
@@ -364,86 +374,178 @@ fun StoryScreen(
                                 enter = fadeIn(),
                                 exit = fadeOut()
                             ) {
+                                // Контейнер с текстом и скроллбаром
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
                                 ) {
-                                    if (state.isTranslating) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator()
-                                        }
-                                    } else {
-                                        // Для отображения используем displayVersion, которая уже без разделителей
-                                        val textForDisplay = if (state.isRussian) state.russianDisplayVersion else state.englishDisplayVersion
-                                        // Для разбиения на предложения и подсветки используем версию с разделителями
-                                        val textWithSeparators = if (state.isRussian) state.russianVersion else state.englishVersion
-                                        val currentSpokenWord = state.currentSpokenWord
-                                        val isSpeaking = state.isSpeaking
-
-                                        Column {
-                                            FlowRow(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                mainAxisAlignment = FlowMainAxisAlignment.Start,
-                                                crossAxisAlignment = FlowCrossAxisAlignment.Start,
-                                                mainAxisSize = SizeMode.Wrap,
-                                                crossAxisSpacing = 8.dp,
-                                                mainAxisSpacing = 8.dp
+                                    // Контент с прокруткой
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .verticalScroll(scrollState)
+                                            .padding(end = 12.dp) // Отступ для скроллбара
+                                    ) {
+                                        if (state.isTranslating) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                // Разбиваем текст на предложения по специальным разделителям
-                                                val sentences = textWithSeparators
-                                                    .split(sentenceSeparator)
-                                                    .map { it.trim() }
-                                                    .filter { it.isNotEmpty() }
+                                                CircularProgressIndicator()
+                                            }
+                                        } else {
+                                            // Для отображения используем displayVersion, которая уже без разделителей
+                                            val textForDisplay = if (state.isRussian) state.russianDisplayVersion else state.englishDisplayVersion
+                                            // Для разбиения на предложения и подсветки используем версию с разделителями
+                                            val textWithSeparators = if (state.isRussian) state.russianVersion else state.englishVersion
+                                            val currentSpokenWord = state.currentSpokenWord
+                                            val isSpeaking = state.isSpeaking
 
-                                                // Отладочное логирование
-                                                if (sentences.size <= 1) {
-                                                    Log.w("BakingScreen", "Only ${sentences.size} sentences found in text of length ${textWithSeparators.length}")
-                                                    Log.d("BakingScreen", "Text contains ${textWithSeparators.count { it == '.' }} periods")
-                                                    Log.d("BakingScreen", "Text contains ${textWithSeparators.split(sentenceSeparator).size - 1} separators")
+                                            Column {
+                                                FlowRow(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    mainAxisAlignment = FlowMainAxisAlignment.Start,
+                                                    crossAxisAlignment = FlowCrossAxisAlignment.Start,
+                                                    mainAxisSize = SizeMode.Wrap,
+                                                    crossAxisSpacing = 8.dp,
+                                                    mainAxisSpacing = 8.dp
+                                                ) {
+                                                    // Разбиваем текст на предложения по специальным разделителям
+                                                    val sentences = textWithSeparators
+                                                        .split(sentenceSeparator)
+                                                        .map { it.trim() }
+                                                        .filter { it.isNotEmpty() }
 
-                                                    // Логируем первые и последние 100 символов для анализа
-                                                    val start = textWithSeparators.take(100)
-                                                    val end = if (textWithSeparators.length > 100) textWithSeparators.takeLast(100) else ""
-                                                    Log.d("BakingScreen", "Text start: $start")
-                                                    Log.d("BakingScreen", "Text end: $end")
-                                                }
+                                                    // Отладочное логирование
+                                                    if (sentences.size <= 1) {
+                                                        Log.w("BakingScreen", "Only ${sentences.size} sentences found in text of length ${textWithSeparators.length}")
+                                                        Log.d("BakingScreen", "Text contains ${textWithSeparators.count { it == '.' }} periods")
+                                                        Log.d("BakingScreen", "Text contains ${textWithSeparators.split(sentenceSeparator).size - 1} separators")
 
-                                                // Отображаем текст целиком для UI, но используем sentences для подсветки
-                                                if (sentences.size > 1) {
-                                                    // Разбиение на предложения успешно сработало, отображаем их с подсветкой
-                                                    sentences.forEach { sentence ->
-                                                        // Определяем, нужно ли подсвечивать текущее предложение:
-                                                        // 1. Если воспроизведение активно - подсвечиваем текущее произносимое предложение
-                                                        // 2. Если воспроизведение остановлено - подсвечиваем последнее предложение или выбранное пользователем
-                                                        val shouldHighlight = when {
-                                                            // Когда идет чтение, подсвечиваем только текущее произносимое предложение
-                                                            isSpeaking && currentSpokenWord.isNotEmpty() &&
-                                                                    currentSpokenWord.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim() -> true
+                                                        // Логируем первые и последние 100 символов для анализа
+                                                        val start = textWithSeparators.take(100)
+                                                        val end = if (textWithSeparators.length > 100) textWithSeparators.takeLast(100) else ""
+                                                        Log.d("BakingScreen", "Text start: $start")
+                                                        Log.d("BakingScreen", "Text end: $end")
+                                                    }
 
-                                                            // Когда чтение остановлено:
-                                                            // Подсвечиваем либо последнее прочитанное предложение, либо выбранное пользователем
-                                                            !isSpeaking && (
-                                                                    (state.lastHighlightedSentence.isNotEmpty() &&
-                                                                            state.lastHighlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim()) ||
-                                                                            (highlightedSentence.isNotEmpty() &&
-                                                                                    highlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim())
-                                                                    ) -> true
+                                                    // Отображаем текст целиком для UI, но используем sentences для подсветки
+                                                    if (sentences.size > 1) {
+                                                        // Разбиение на предложения успешно сработало, отображаем их с подсветкой
+                                                        sentences.forEach { sentence ->
+                                                            // Определяем, нужно ли подсвечивать текущее предложение:
+                                                            // 1. Если воспроизведение активно - подсвечиваем текущее произносимое предложение
+                                                            // 2. Если воспроизведение остановлено - подсвечиваем последнее предложение или выбранное пользователем
+                                                            val shouldHighlight = when {
+                                                                // Когда идет чтение, подсвечиваем только текущее произносимое предложение
+                                                                isSpeaking && currentSpokenWord.isNotEmpty() &&
+                                                                        currentSpokenWord.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim() -> true
 
-                                                            else -> false
+                                                                // Когда чтение остановлено:
+                                                                // Подсвечиваем либо последнее прочитанное предложение, либо выбранное пользователем
+                                                                !isSpeaking && (
+                                                                        (state.lastHighlightedSentence.isNotEmpty() &&
+                                                                                state.lastHighlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim()) ||
+                                                                                (highlightedSentence.isNotEmpty() &&
+                                                                                        highlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim())
+                                                                        ) -> true
+
+                                                                else -> false
+                                                            }
+
+                                                            // Отображаем предложение без разделителей
+                                                            val cleanSentence = sentence.replace(sentenceSeparator, "")
+
+                                                            // Для отслеживания расположения текста и выделения конкретных слов
+                                                            var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+                                                            Text(
+                                                                text = cleanSentence + " ",
+                                                                style = MaterialTheme.typography.bodyLarge,
+                                                                color = MaterialTheme.colorScheme.onSurface,
+                                                                overflow = TextOverflow.Visible,
+                                                                onTextLayout = { textLayoutResult = it },
+                                                                modifier = Modifier
+                                                                    .pointerInput(Unit) {
+                                                                        detectTapGestures(
+                                                                            onTap = {
+                                                                                // Обработка нажатия только если чтение не активно
+                                                                                if (!isSpeaking) {
+                                                                                    highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+                                                                                }
+                                                                            },
+                                                                            onLongPress = { offset ->
+                                                                                // Находим конкретное слово, на которое нажал пользователь
+                                                                                val layoutResult = textLayoutResult
+                                                                                if (layoutResult != null) {
+                                                                                    // Находим позицию символа под координатой нажатия
+                                                                                    val position = layoutResult.getOffsetForPosition(offset)
+
+                                                                                    // Находим границы слова
+                                                                                    val text = cleanSentence
+                                                                                    var wordStart = position
+                                                                                    var wordEnd = position
+
+                                                                                    // Определяем начало слова
+                                                                                    while (wordStart > 0 && !text[wordStart - 1].isWhitespace() && !text[wordStart - 1].isPunctuation()) {
+                                                                                        wordStart--
+                                                                                    }
+
+                                                                                    // Определяем конец слова
+                                                                                    while (wordEnd < text.length && !text[wordEnd].isWhitespace() && !text[wordEnd].isPunctuation()) {
+                                                                                        wordEnd++
+                                                                                    }
+
+                                                                                    // Проверяем, что диапазон не пуст
+                                                                                    if (wordStart < wordEnd) {
+                                                                                        // Извлекаем слово
+                                                                                        val tappedWord = text.substring(wordStart, wordEnd)
+
+                                                                                        // Очищаем слово от знаков пунктуации
+                                                                                        val cleanWord = tappedWord.replace(Regex("[^\\p{L}\\p{N}-]"), "")
+
+                                                                                        if (cleanWord.isNotEmpty()) {
+                                                                                            Log.d("BakingScreen", "Tapped on word: '$cleanWord' at position $position")
+                                                                                            selectedWord = cleanWord
+                                                                                            storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
+                                                                                                wordInfo = info
+                                                                                                showWordDialog = true
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                } else {
+                                                                                    // Fallback, если layoutResult недоступен
+                                                                                    val words = cleanSentence.split(" ")
+                                                                                    if (words.isNotEmpty()) {
+                                                                                        val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
+                                                                                        if (randomWord.isNotEmpty()) {
+                                                                                            selectedWord = randomWord
+                                                                                            storyViewModel.getWordInfoAndUpdate(randomWord) { info ->
+                                                                                                wordInfo = info
+                                                                                                showWordDialog = true
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        )
+                                                                    }
+                                                                    .then(
+                                                                        if (shouldHighlight) {
+                                                                            Modifier.background(Color.Yellow.copy(alpha = 0.3f))
+                                                                        } else {
+                                                                            Modifier
+                                                                        }
+                                                                    )
+                                                            )
                                                         }
-
-                                                        // Отображаем предложение без разделителей
-                                                        val cleanSentence = sentence.replace(sentenceSeparator, "")
-
-                                                        // Для отслеживания расположения текста и выделения конкретных слов
+                                                    } else {
+                                                        // Если разбиение не удалось, отображаем полный текст для отображения
+                                                        // и добавляем функциональность выделения слов при долгом нажатии
                                                         var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
                                                         Text(
-                                                            text = cleanSentence + " ",
+                                                            text = textForDisplay,
                                                             style = MaterialTheme.typography.bodyLarge,
                                                             color = MaterialTheme.colorScheme.onSurface,
                                                             overflow = TextOverflow.Visible,
@@ -452,20 +554,19 @@ fun StoryScreen(
                                                                 .pointerInput(Unit) {
                                                                     detectTapGestures(
                                                                         onTap = {
-                                                                            // Обработка нажатия только если чтение не активно
+                                                                            // При отсутствии предложений, выделяем целый текст
                                                                             if (!isSpeaking) {
-                                                                                highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+                                                                                highlightedSentence = if (highlightedSentence.isNotEmpty()) "" else textForDisplay
                                                                             }
                                                                         },
                                                                         onLongPress = { offset ->
-                                                                            // Находим конкретное слово, на которое нажал пользователь
                                                                             val layoutResult = textLayoutResult
                                                                             if (layoutResult != null) {
                                                                                 // Находим позицию символа под координатой нажатия
                                                                                 val position = layoutResult.getOffsetForPosition(offset)
 
                                                                                 // Находим границы слова
-                                                                                val text = cleanSentence
+                                                                                val text = textForDisplay
                                                                                 var wordStart = position
                                                                                 var wordEnd = position
 
@@ -498,7 +599,7 @@ fun StoryScreen(
                                                                                 }
                                                                             } else {
                                                                                 // Fallback, если layoutResult недоступен
-                                                                                val words = cleanSentence.split(" ")
+                                                                                val words = textForDisplay.split(" ")
                                                                                 if (words.isNotEmpty()) {
                                                                                     val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
                                                                                     if (randomWord.isNotEmpty()) {
@@ -514,7 +615,7 @@ fun StoryScreen(
                                                                     )
                                                                 }
                                                                 .then(
-                                                                    if (shouldHighlight) {
+                                                                    if (currentSpokenWord.isNotEmpty()) {
                                                                         Modifier.background(Color.Yellow.copy(alpha = 0.3f))
                                                                     } else {
                                                                         Modifier
@@ -522,93 +623,18 @@ fun StoryScreen(
                                                                 )
                                                         )
                                                     }
-                                                } else {
-                                                    // Если разбиение не удалось, отображаем полный текст для отображения
-                                                    // и добавляем функциональность выделения слов при долгом нажатии
-                                                    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-
-                                                    Text(
-                                                        text = textForDisplay,
-                                                        style = MaterialTheme.typography.bodyLarge,
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        overflow = TextOverflow.Visible,
-                                                        onTextLayout = { textLayoutResult = it },
-                                                        modifier = Modifier
-                                                            .pointerInput(Unit) {
-                                                                detectTapGestures(
-                                                                    onTap = {
-                                                                        // При отсутствии предложений, выделяем целый текст
-                                                                        if (!isSpeaking) {
-                                                                            highlightedSentence = if (highlightedSentence.isNotEmpty()) "" else textForDisplay
-                                                                        }
-                                                                    },
-                                                                    onLongPress = { offset ->
-                                                                        val layoutResult = textLayoutResult
-                                                                        if (layoutResult != null) {
-                                                                            // Находим позицию символа под координатой нажатия
-                                                                            val position = layoutResult.getOffsetForPosition(offset)
-
-                                                                            // Находим границы слова
-                                                                            val text = textForDisplay
-                                                                            var wordStart = position
-                                                                            var wordEnd = position
-
-                                                                            // Определяем начало слова
-                                                                            while (wordStart > 0 && !text[wordStart - 1].isWhitespace() && !text[wordStart - 1].isPunctuation()) {
-                                                                                wordStart--
-                                                                            }
-
-                                                                            // Определяем конец слова
-                                                                            while (wordEnd < text.length && !text[wordEnd].isWhitespace() && !text[wordEnd].isPunctuation()) {
-                                                                                wordEnd++
-                                                                            }
-
-                                                                            // Проверяем, что диапазон не пуст
-                                                                            if (wordStart < wordEnd) {
-                                                                                // Извлекаем слово
-                                                                                val tappedWord = text.substring(wordStart, wordEnd)
-
-                                                                                // Очищаем слово от знаков пунктуации
-                                                                                val cleanWord = tappedWord.replace(Regex("[^\\p{L}\\p{N}-]"), "")
-
-                                                                                if (cleanWord.isNotEmpty()) {
-                                                                                    Log.d("BakingScreen", "Tapped on word: '$cleanWord' at position $position")
-                                                                                    selectedWord = cleanWord
-                                                                                    storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
-                                                                                        wordInfo = info
-                                                                                        showWordDialog = true
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        } else {
-                                                                            // Fallback, если layoutResult недоступен
-                                                                            val words = textForDisplay.split(" ")
-                                                                            if (words.isNotEmpty()) {
-                                                                                val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
-                                                                                if (randomWord.isNotEmpty()) {
-                                                                                    selectedWord = randomWord
-                                                                                    storyViewModel.getWordInfoAndUpdate(randomWord) { info ->
-                                                                                        wordInfo = info
-                                                                                        showWordDialog = true
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                )
-                                                            }
-                                                            .then(
-                                                                if (currentSpokenWord.isNotEmpty()) {
-                                                                    Modifier.background(Color.Yellow.copy(alpha = 0.3f))
-                                                                } else {
-                                                                    Modifier
-                                                                }
-                                                            )
-                                                    )
                                                 }
                                             }
                                         }
                                     }
+
+                                    // Кастомный скроллбар
+                                    VerticalScrollbar(
+                                        scrollState = scrollState,
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .fillMaxHeight()
+                                    )
                                 }
                             }
 
@@ -710,7 +736,39 @@ fun StoryScreen(
     }
 }
 
-// Расширение для Char для определения знаков пунктуации
+// Композабл для отображения вертикального скроллбара
+@Composable
+fun VerticalScrollbar(
+    scrollState: androidx.compose.foundation.ScrollState,
+    modifier: Modifier = Modifier,
+    width: Dp = 8.dp,
+    thumbColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+    trackColor: Color = MaterialTheme.colorScheme.surface
+) {
+    // Показываем скроллбар только если есть контент для прокрутки
+    if (scrollState.maxValue > 0) {
+        Box(
+            modifier = modifier
+                .width(width)
+                .fillMaxHeight()
+                .background(trackColor)
+        ) {
+            // Размер и позиция ползунка
+            val thumbHeight = (scrollState.viewportSize / (scrollState.maxValue + scrollState.viewportSize)) * scrollState.maxValue
+            val thumbPosition = (scrollState.value / scrollState.maxValue.toFloat()) * (scrollState.maxValue - thumbHeight)
+
+            // Рисуем ползунок
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(thumbHeight.toFloat().dp)
+                    .offset(y = thumbPosition.toFloat().dp)
+                    .background(color = thumbColor, shape = MaterialTheme.shapes.small)
+            )
+        }
+    }
+}
+
 // Расширение для Char для определения знаков пунктуации
 fun Char.isPunctuation(): Boolean {
     return this in ".,;:!?\"'()[]{}<>«»—–-…/\\&@#$%^*_=+`~|"
