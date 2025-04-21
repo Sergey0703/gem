@@ -38,6 +38,9 @@ class StoryViewModel @Inject constructor(
     private var currentLanguage = "en"
     private var isSmoothReading = false
 
+    // Специальный разделитель предложений
+    private val SENTENCE_SEPARATOR = "<<SENTENCE_END>>"
+
     // Количество слов, которое будет использовано для каждой истории
     private val STORY_WORDS_COUNT = 300
     // Максимальное количество слов, которое будет получено из базы данных
@@ -175,10 +178,18 @@ class StoryViewModel @Inject constructor(
                         4. Break the story into logical paragraphs for readability
                         5. Make sure the story has a clear beginning, middle, and end
                         6. Focus on making connections between words to create a coherent narrative
+                        7. EXTREMELY IMPORTANT: After each complete sentence (ending with period, exclamation mark, or question mark), insert the exact text "$SENTENCE_SEPARATOR". 
+                           DO NOT abbreviate or modify this separator in any way. 
+                           DO NOT skip adding this separator after ANY sentence.
+                           Include this separator even at paragraph breaks.
+                        
+                        Example format:
+                        This is the first sentence.$SENTENCE_SEPARATOR This is the second sentence.$SENTENCE_SEPARATOR
                         
                         Important:
                         - Every word from the list MUST be used exactly once
                         - Only mark the exact words with asterisks
+                        - Add "$SENTENCE_SEPARATOR" after EVERY sentence
                         - Write only the story, no additional text or explanations
                         - Make sure the story makes sense and reads naturally
                     """.trimIndent()
@@ -195,10 +206,18 @@ class StoryViewModel @Inject constructor(
                         3. You can modify the existing story to naturally incorporate the missing words
                         4. Keep the story's structure and main ideas, but expand it to include all words
                         5. Ensure the story flows naturally and makes sense
+                        6. EXTREMELY IMPORTANT: After each complete sentence (ending with period, exclamation mark, or question mark), insert the exact text "$SENTENCE_SEPARATOR". 
+                           DO NOT abbreviate or modify this separator in any way. 
+                           DO NOT skip adding this separator after ANY sentence.
+                           Include this separator even at paragraph breaks.
+                        
+                        Example format:
+                        This is the first sentence.$SENTENCE_SEPARATOR This is the second sentence.$SENTENCE_SEPARATOR
                         
                         Important:
                         - Every word from the missing list MUST be used
                         - Only mark the exact words with asterisks
+                        - Add "$SENTENCE_SEPARATOR" after EVERY sentence
                         - Write the complete story, not just the additions
                     """.trimIndent()
                 }
@@ -206,6 +225,10 @@ class StoryViewModel @Inject constructor(
                 Log.d(TAG, "Generating story - Attempt $attempt of $maxAttempts")
                 val response = generativeModel.generateContent(storyPrompt)
                 englishStory = response.text?.trim() ?: throw Exception("Empty response from API")
+
+                Log.d(TAG, "Raw API response first 500 chars: ${englishStory.take(500)}")
+                Log.d(TAG, "Contains separators: ${englishStory.contains(SENTENCE_SEPARATOR)}")
+                Log.d(TAG, "Count of separators: ${englishStory.split(SENTENCE_SEPARATOR).size - 1}")
 
                 // Проверяем использование всех слов
                 val usedWords = availableWords.filter { word ->
@@ -235,7 +258,9 @@ class StoryViewModel @Inject constructor(
                     // Все слова использованы, обновляем состояние и завершаем
                     _uiState.value = UiState.Success(
                         englishVersion = englishStory,
+                        englishDisplayVersion = cleanTextForUI(cleanTextForDisplay(englishStory)),
                         russianVersion = "",
+                        russianDisplayVersion = "",
                         selectedWords = availableWords,
                         isRussian = false,
                         currentSpokenWord = "",
@@ -256,7 +281,9 @@ class StoryViewModel @Inject constructor(
                         // Если это последняя попытка, но пропущенных слов меньше порога, используем текущую версию
                         _uiState.value = UiState.Success(
                             englishVersion = englishStory,
+                            englishDisplayVersion = cleanTextForUI(cleanTextForDisplay(englishStory)),
                             russianVersion = "",
+                            russianDisplayVersion = "",
                             selectedWords = availableWords,
                             isRussian = false,
                             currentSpokenWord = "",
@@ -304,17 +331,62 @@ class StoryViewModel @Inject constructor(
         }
     }
 
+    // Убираем только звездочки, НО СОХРАНЯЕМ разделители предложений
     private fun cleanTextForDisplay(text: String): String {
-        return text.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
-            matchResult.groupValues[1] // Возвращаем только текст внутри звездочек
-        }
+        return text
+            .replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+                matchResult.groupValues[1] // Возвращаем только текст внутри звездочек
+            }
+    }
+
+    // Удаляем разделители только при отображении в UI
+    private fun cleanTextForUI(text: String): String {
+        return text.replace(SENTENCE_SEPARATOR, "")
     }
 
     private fun cleanTextForSpeech(text: String): String {
         // Убираем звездочки и другие специальные символы, оставляем только текст и базовую пунктуацию
-        return text.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
-            matchResult.groupValues[1]
-        }.replace(Regex("[^\\p{L}\\p{N}\\s.,!?;:-]"), "") // Оставляем буквы, цифры, пробелы и основные знаки пунктуации
+        return text
+            .replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+                matchResult.groupValues[1]
+            }
+            .replace(Regex("[^\\p{L}\\p{N}\\s.,!?;:-]"), "") // Оставляем буквы, цифры, пробелы и основные знаки пунктуации
+    }
+
+    // Разбить текст на предложения по специальным разделителям
+    private fun splitIntoSentences(text: String): List<String> {
+        Log.d(TAG, "Original text contains ${text.count { it == '.' }} periods")
+        Log.d(TAG, "Original text contains ${text.count { it == '!' }} exclamation marks")
+        Log.d(TAG, "Original text contains ${text.count { it == '?' }} question marks")
+        Log.d(TAG, "Original text contains ${text.split(SENTENCE_SEPARATOR).size - 1} separators")
+
+        val sentences = text.split(SENTENCE_SEPARATOR)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        Log.d(TAG, "Split text into ${sentences.size} sentences using separators")
+        sentences.forEachIndexed { index, sentence ->
+            if (index < 3) { // Логируем только первые несколько предложений для экономии места в логах
+                Log.d(TAG, "Sentence ${index + 1}: first 50 chars: ${sentence.take(50)}...")
+            }
+        }
+
+        // Если разделители не сработали (получилось только 1 предложение),
+        // логируем подробную информацию для отладки
+        if (sentences.size <= 1 && text.length > 100) {
+            Log.w(TAG, "Failed to split by separators, text too long for single sentence")
+            // Только для логирования, не возвращаем этот результат
+            val fallbackSentences = text.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])"))
+            Log.d(TAG, "Fallback splitting would yield ${fallbackSentences.size} sentences")
+
+            // Логируем первые и последние 100 символов для анализа
+            val start = text.take(100)
+            val end = if (text.length > 100) text.takeLast(100) else ""
+            Log.d(TAG, "Text start: $start")
+            Log.d(TAG, "Text end: $end")
+        }
+
+        return sentences
     }
 
     private fun setTTSLanguage(isRussian: Boolean) {
@@ -351,10 +423,8 @@ class StoryViewModel @Inject constructor(
                 setTTSLanguage(state.isRussian)
             }
 
-            // Разбиваем текст на предложения
-            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])"))
-                .filter { it.isNotBlank() }
-                .map { it.trim() }
+            // Разбиваем текст на предложения по разделителям
+            sentences = splitIntoSentences(text)
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
@@ -378,6 +448,8 @@ class StoryViewModel @Inject constructor(
             if (currentSentenceIndex < sentences.size) {
                 val sentence = sentences[currentSentenceIndex]
 
+                Log.d(TAG, "Speaking sentence ${currentSentenceIndex + 1}/${sentences.size}: \"$sentence\"")
+
                 // Обновляем UI с текущим предложением
                 viewModelScope.launch {
                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
@@ -385,9 +457,10 @@ class StoryViewModel @Inject constructor(
                     ) ?: _uiState.value
                 }
 
-                tts?.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
+                tts?.speak(cleanTextForSpeech(sentence), TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Error speaking sentence", e)
             _uiState.value = UiState.Error("Error speaking sentence: ${e.localizedMessage}")
         }
     }
@@ -482,7 +555,7 @@ class StoryViewModel @Inject constructor(
             }
 
             isSpeaking = true
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
+            tts?.speak(cleanTextForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
         } catch (e: Exception) {
             _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
         }
@@ -497,9 +570,16 @@ class StoryViewModel @Inject constructor(
                 val endTime = System.currentTimeMillis()
                 val generationTime = (endTime - startTime) / 1000.0
 
+                // Сохраняем оригинальный текст с разделителями для разбиения,
+                // но для отображения пользователю удаляем разделители
+                val originalText = result.first
+                val displayText = cleanTextForUI(cleanTextForDisplay(originalText))
+
                 _uiState.value = UiState.Success(
-                    englishVersion = cleanTextForDisplay(result.first),
+                    englishVersion = originalText, // Сохраняем оригинальный текст с разделителями
+                    englishDisplayVersion = displayText, // Версия для отображения (без разделителей)
                     russianVersion = "",
+                    russianDisplayVersion = "",
                     selectedWords = result.third,
                     generationTime = generationTime
                 )
@@ -528,17 +608,18 @@ class StoryViewModel @Inject constructor(
                 setTTSLanguage(state.isRussian)
             }
 
-            // Разбиваем текст на предложения
-            sentences = cleanedText.split(Regex("(?<=[.!?])\\s+(?=[A-ZА-Я])"))
-                .filter { it.isNotBlank() }
-                .map { it.trim() }
+            // Разбиваем текст на предложения по разделителям
+            sentences = splitIntoSentences(text)
 
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
 
                 // Определяем начальный индекс
                 currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
-                    sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
+                    val index = sentences.indexOfFirst { sent ->
+                        sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                    }
+                    if (index >= 0) index else 0
                 } else {
                     0
                 }
@@ -568,7 +649,14 @@ class StoryViewModel @Inject constructor(
                         val translationPrompt = """
                             Translate this story to Russian. Keep the same formatting and paragraph breaks.
                             Mark the translated equivalents of marked words with asterisks.
-                            Do not add any additional formatting or special characters.
+                            
+                            CRITICAL INSTRUCTION: After each complete sentence (ending with period, exclamation mark, or question mark), insert the exact text "$SENTENCE_SEPARATOR". 
+                            DO NOT abbreviate or modify this separator in any way. 
+                            DO NOT skip adding this separator after ANY sentence.
+                            Include this separator even at paragraph breaks.
+                            
+                            Example format:
+                            This is the first sentence.$SENTENCE_SEPARATOR This is the second sentence.$SENTENCE_SEPARATOR
                             
                             Story to translate:
                             ${currentState.englishVersion}
@@ -580,14 +668,24 @@ class StoryViewModel @Inject constructor(
                         val response = generativeModel.generateContent(translationPrompt)
                         var russianStory = response.text?.trim() ?: throw Exception("Empty translation response")
 
-                        // Очищаем текст от лишних символов
-                        russianStory = cleanTextForDisplay(russianStory)
+                        Log.d(TAG, "Russian translation raw first 500 chars: ${russianStory.take(500)}")
+                        Log.d(TAG, "Russian contains separators: ${russianStory.contains(SENTENCE_SEPARATOR)}")
+                        Log.d(TAG, "Russian count of separators: ${russianStory.split(SENTENCE_SEPARATOR).size - 1}")
+
+                        // Очищаем текст от звездочек, но сохраняем специальные разделители предложений
+                        russianStory = russianStory.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+                            matchResult.groupValues[1] // Возвращаем только текст внутри звездочек
+                        }
+
+                        // Создаем версию для отображения
+                        val russianDisplayText = cleanTextForUI(russianStory)
 
                         Log.d(TAG, "Translation received")
                         Log.d(TAG, "Russian story length: ${russianStory.length}")
 
                         _uiState.value = currentState.copy(
-                            russianVersion = russianStory,
+                            russianVersion = russianStory, // С разделителями
+                            russianDisplayVersion = russianDisplayText, // Без разделителей
                             isRussian = true,
                             isTranslating = false
                         )

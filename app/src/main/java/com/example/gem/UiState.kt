@@ -26,8 +26,10 @@ sealed class UiState {
      * Text has been generated
      */
     data class Success(
-        val englishVersion: String,
-        val russianVersion: String,
+        val englishVersion: String, // Хранит версию с разделителями для разбиения
+        val englishDisplayVersion: String, // Версия без разделителей для отображения
+        val russianVersion: String, // Хранит версию с разделителями для разбиения
+        val russianDisplayVersion: String = "", // Версия без разделителей для отображения
         val selectedWords: List<String>,
         val isRussian: Boolean = false,
         val currentSpokenWord: String = "",
