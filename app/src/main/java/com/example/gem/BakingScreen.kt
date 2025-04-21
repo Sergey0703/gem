@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
@@ -39,6 +40,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.flowlayout.FlowRow
 import com.google.accompanist.flowlayout.FlowCrossAxisAlignment
@@ -215,51 +218,6 @@ fun StoryScreen(
         when (val state = uiState) {
             is UiState.Loading -> {
                 // Закомментировали верхнюю карточку с прогрессом, так как теперь используем модальное окно
-                /*Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (state.attempt > 0) {
-                            Text(
-                                text = "Story generated - Attempt ${state.attempt}/${state.maxAttempts}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (state.storyLength > 0) {
-                                Text(
-                                    text = "Length: ${state.storyLength}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            if (state.usedWordsCount > 0) {
-                                Text(
-                                    text = "Used words count: ${state.usedWordsCount}/${state.totalWords}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            if (state.missingWords.isNotEmpty()) {
-                                Text(
-                                    text = "Missing words: ${state.missingWords.joinToString(", ")}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            progress = state.attempt.toFloat() / state.maxAttempts
-                        )
-                    }
-                }*/
             }
             is UiState.Success -> {
                 Card(
@@ -481,10 +439,15 @@ fun StoryScreen(
                                                         // Отображаем предложение без разделителей
                                                         val cleanSentence = sentence.replace(sentenceSeparator, "")
 
+                                                        // Для отслеживания расположения текста и выделения конкретных слов
+                                                        var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
                                                         Text(
                                                             text = cleanSentence + " ",
                                                             style = MaterialTheme.typography.bodyLarge,
                                                             color = MaterialTheme.colorScheme.onSurface,
+                                                            overflow = TextOverflow.Visible,
+                                                            onTextLayout = { textLayoutResult = it },
                                                             modifier = Modifier
                                                                 .pointerInput(Unit) {
                                                                     detectTapGestures(
@@ -494,16 +457,56 @@ fun StoryScreen(
                                                                                 highlightedSentence = if (highlightedSentence == sentence) "" else sentence
                                                                             }
                                                                         },
-                                                                        onLongPress = {
-                                                                            // Даже при активном чтении можно узнать значение слова
-                                                                            val words = sentence.split(" ")
-                                                                            if (words.isNotEmpty()) {
-                                                                                val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
-                                                                                if (randomWord.isNotEmpty()) {
-                                                                                    selectedWord = randomWord
-                                                                                    storyViewModel.getWordInfoAndUpdate(randomWord) { info ->
-                                                                                        wordInfo = info
-                                                                                        showWordDialog = true
+                                                                        onLongPress = { offset ->
+                                                                            // Находим конкретное слово, на которое нажал пользователь
+                                                                            val layoutResult = textLayoutResult
+                                                                            if (layoutResult != null) {
+                                                                                // Находим позицию символа под координатой нажатия
+                                                                                val position = layoutResult.getOffsetForPosition(offset)
+
+                                                                                // Находим границы слова
+                                                                                val text = cleanSentence
+                                                                                var wordStart = position
+                                                                                var wordEnd = position
+
+                                                                                // Определяем начало слова
+                                                                                while (wordStart > 0 && !text[wordStart - 1].isWhitespace() && !text[wordStart - 1].isPunctuation()) {
+                                                                                    wordStart--
+                                                                                }
+
+                                                                                // Определяем конец слова
+                                                                                while (wordEnd < text.length && !text[wordEnd].isWhitespace() && !text[wordEnd].isPunctuation()) {
+                                                                                    wordEnd++
+                                                                                }
+
+                                                                                // Проверяем, что диапазон не пуст
+                                                                                if (wordStart < wordEnd) {
+                                                                                    // Извлекаем слово
+                                                                                    val tappedWord = text.substring(wordStart, wordEnd)
+
+                                                                                    // Очищаем слово от знаков пунктуации
+                                                                                    val cleanWord = tappedWord.replace(Regex("[^\\p{L}\\p{N}-]"), "")
+
+                                                                                    if (cleanWord.isNotEmpty()) {
+                                                                                        Log.d("BakingScreen", "Tapped on word: '$cleanWord' at position $position")
+                                                                                        selectedWord = cleanWord
+                                                                                        storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
+                                                                                            wordInfo = info
+                                                                                            showWordDialog = true
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            } else {
+                                                                                // Fallback, если layoutResult недоступен
+                                                                                val words = cleanSentence.split(" ")
+                                                                                if (words.isNotEmpty()) {
+                                                                                    val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
+                                                                                    if (randomWord.isNotEmpty()) {
+                                                                                        selectedWord = randomWord
+                                                                                        storyViewModel.getWordInfoAndUpdate(randomWord) { info ->
+                                                                                            wordInfo = info
+                                                                                            showWordDialog = true
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                             }
@@ -521,40 +524,87 @@ fun StoryScreen(
                                                     }
                                                 } else {
                                                     // Если разбиение не удалось, отображаем полный текст для отображения
-                                                    // и разбиваем его по словам
-                                                    textForDisplay.split(Regex("\\s+")).forEach { word ->
-                                                        val cleanWord = word.trim().replace(Regex("[^\\p{L}\\p{N}-]"), "")
-                                                        if (cleanWord.isNotEmpty()) {
-                                                            Text(
-                                                                text = word + " ",
-                                                                style = MaterialTheme.typography.bodyLarge,
-                                                                color = MaterialTheme.colorScheme.onSurface,
-                                                                modifier = Modifier
-                                                                    .pointerInput(Unit) {
-                                                                        detectTapGestures(
-                                                                            onTap = {
-                                                                                // При отсутствии предложений, выделяем целый текст
-                                                                                highlightedSentence = if (highlightedSentence.isNotEmpty()) "" else textForDisplay
-                                                                            },
-                                                                            onLongPress = {
-                                                                                selectedWord = cleanWord
-                                                                                storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
-                                                                                    wordInfo = info
-                                                                                    showWordDialog = true
+                                                    // и добавляем функциональность выделения слов при долгом нажатии
+                                                    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+                                                    Text(
+                                                        text = textForDisplay,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        overflow = TextOverflow.Visible,
+                                                        onTextLayout = { textLayoutResult = it },
+                                                        modifier = Modifier
+                                                            .pointerInput(Unit) {
+                                                                detectTapGestures(
+                                                                    onTap = {
+                                                                        // При отсутствии предложений, выделяем целый текст
+                                                                        if (!isSpeaking) {
+                                                                            highlightedSentence = if (highlightedSentence.isNotEmpty()) "" else textForDisplay
+                                                                        }
+                                                                    },
+                                                                    onLongPress = { offset ->
+                                                                        val layoutResult = textLayoutResult
+                                                                        if (layoutResult != null) {
+                                                                            // Находим позицию символа под координатой нажатия
+                                                                            val position = layoutResult.getOffsetForPosition(offset)
+
+                                                                            // Находим границы слова
+                                                                            val text = textForDisplay
+                                                                            var wordStart = position
+                                                                            var wordEnd = position
+
+                                                                            // Определяем начало слова
+                                                                            while (wordStart > 0 && !text[wordStart - 1].isWhitespace() && !text[wordStart - 1].isPunctuation()) {
+                                                                                wordStart--
+                                                                            }
+
+                                                                            // Определяем конец слова
+                                                                            while (wordEnd < text.length && !text[wordEnd].isWhitespace() && !text[wordEnd].isPunctuation()) {
+                                                                                wordEnd++
+                                                                            }
+
+                                                                            // Проверяем, что диапазон не пуст
+                                                                            if (wordStart < wordEnd) {
+                                                                                // Извлекаем слово
+                                                                                val tappedWord = text.substring(wordStart, wordEnd)
+
+                                                                                // Очищаем слово от знаков пунктуации
+                                                                                val cleanWord = tappedWord.replace(Regex("[^\\p{L}\\p{N}-]"), "")
+
+                                                                                if (cleanWord.isNotEmpty()) {
+                                                                                    Log.d("BakingScreen", "Tapped on word: '$cleanWord' at position $position")
+                                                                                    selectedWord = cleanWord
+                                                                                    storyViewModel.getWordInfoAndUpdate(cleanWord) { info ->
+                                                                                        wordInfo = info
+                                                                                        showWordDialog = true
+                                                                                    }
                                                                                 }
                                                                             }
-                                                                        )
-                                                                    }
-                                                                    .then(
-                                                                        if (currentSpokenWord.isNotEmpty()) {
-                                                                            Modifier.background(Color.Yellow.copy(alpha = 0.3f))
                                                                         } else {
-                                                                            Modifier
+                                                                            // Fallback, если layoutResult недоступен
+                                                                            val words = textForDisplay.split(" ")
+                                                                            if (words.isNotEmpty()) {
+                                                                                val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")
+                                                                                if (randomWord.isNotEmpty()) {
+                                                                                    selectedWord = randomWord
+                                                                                    storyViewModel.getWordInfoAndUpdate(randomWord) { info ->
+                                                                                        wordInfo = info
+                                                                                        showWordDialog = true
+                                                                                    }
+                                                                                }
+                                                                            }
                                                                         }
-                                                                    )
+                                                                    }
+                                                                )
+                                                            }
+                                                            .then(
+                                                                if (currentSpokenWord.isNotEmpty()) {
+                                                                    Modifier.background(Color.Yellow.copy(alpha = 0.3f))
+                                                                } else {
+                                                                    Modifier
+                                                                }
                                                             )
-                                                        }
-                                                    }
+                                                    )
                                                 }
                                             }
                                         }
@@ -658,6 +708,12 @@ fun StoryScreen(
             }
         }
     }
+}
+
+// Расширение для Char для определения знаков пунктуации
+// Расширение для Char для определения знаков пунктуации
+fun Char.isPunctuation(): Boolean {
+    return this in ".,;:!?\"'()[]{}<>«»—–-…/\\&@#$%^*_=+`~|"
 }
 
 @Preview(showSystemUi = true)
