@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -380,17 +381,21 @@ fun StoryScreen(
                                     )
                                     IconButton(
                                         onClick = {
-                                            storyViewModel.speakTextWithHighlight(
-                                                context,
-                                                if (state.isRussian) state.russianVersion else state.englishVersion,
-                                                highlightedSentence
-                                            )
+                                            if (state.isSpeaking) {
+                                                storyViewModel.stopSpeaking()
+                                            } else {
+                                                storyViewModel.speakTextWithHighlight(
+                                                    context,
+                                                    if (state.isRussian) state.russianVersion else state.englishVersion,
+                                                    highlightedSentence
+                                                )
+                                            }
                                         },
                                         modifier = Modifier.align(Alignment.CenterVertically)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Filled.VolumeUp,
-                                            contentDescription = "Read text with highlighting"
+                                            imageVector = if (state.isSpeaking) Icons.Filled.Stop else Icons.Filled.VolumeUp,
+                                            contentDescription = if (state.isSpeaking) "Stop reading" else "Read text with highlighting"
                                         )
                                     }
                                 }
@@ -419,6 +424,7 @@ fun StoryScreen(
                                         // Для разбиения на предложения и подсветки используем версию с разделителями
                                         val textWithSeparators = if (state.isRussian) state.russianVersion else state.englishVersion
                                         val currentSpokenWord = state.currentSpokenWord
+                                        val isSpeaking = state.isSpeaking
 
                                         Column {
                                             FlowRow(
@@ -452,11 +458,25 @@ fun StoryScreen(
                                                 if (sentences.size > 1) {
                                                     // Разбиение на предложения успешно сработало, отображаем их с подсветкой
                                                     sentences.forEach { sentence ->
-                                                        // Определяем, нужно ли подсвечивать текущее предложение
-                                                        val shouldHighlight = (
-                                                                currentSpokenWord.isNotEmpty() &&
-                                                                        currentSpokenWord.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim()
-                                                                ) || sentence.replace(sentenceSeparator, "").trim() == highlightedSentence.replace(sentenceSeparator, "").trim()
+                                                        // Определяем, нужно ли подсвечивать текущее предложение:
+                                                        // 1. Если воспроизведение активно - подсвечиваем текущее произносимое предложение
+                                                        // 2. Если воспроизведение остановлено - подсвечиваем последнее предложение или выбранное пользователем
+                                                        val shouldHighlight = when {
+                                                            // Когда идет чтение, подсвечиваем только текущее произносимое предложение
+                                                            isSpeaking && currentSpokenWord.isNotEmpty() &&
+                                                                    currentSpokenWord.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim() -> true
+
+                                                            // Когда чтение остановлено:
+                                                            // Подсвечиваем либо последнее прочитанное предложение, либо выбранное пользователем
+                                                            !isSpeaking && (
+                                                                    (state.lastHighlightedSentence.isNotEmpty() &&
+                                                                            state.lastHighlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim()) ||
+                                                                            (highlightedSentence.isNotEmpty() &&
+                                                                                    highlightedSentence.replace(sentenceSeparator, "").trim() == sentence.replace(sentenceSeparator, "").trim())
+                                                                    ) -> true
+
+                                                            else -> false
+                                                        }
 
                                                         // Отображаем предложение без разделителей
                                                         val cleanSentence = sentence.replace(sentenceSeparator, "")
@@ -469,10 +489,13 @@ fun StoryScreen(
                                                                 .pointerInput(Unit) {
                                                                     detectTapGestures(
                                                                         onTap = {
-                                                                            highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+                                                                            // Обработка нажатия только если чтение не активно
+                                                                            if (!isSpeaking) {
+                                                                                highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+                                                                            }
                                                                         },
                                                                         onLongPress = {
-                                                                            // Выделяем слово под долгим нажатием
+                                                                            // Даже при активном чтении можно узнать значение слова
                                                                             val words = sentence.split(" ")
                                                                             if (words.isNotEmpty()) {
                                                                                 val randomWord = words.random().replace(Regex("[^\\p{L}\\p{N}-]"), "")

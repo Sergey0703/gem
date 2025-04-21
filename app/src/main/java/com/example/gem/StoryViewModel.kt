@@ -38,6 +38,9 @@ class StoryViewModel @Inject constructor(
     private var currentLanguage = "en"
     private var isSmoothReading = false
 
+    // Переменная для сохранения последнего прочитанного предложения
+    private var lastHighlightedSentence = ""
+
     // Специальный разделитель предложений
     private val SENTENCE_SEPARATOR = "<<SENTENCE_END>>"
 
@@ -73,8 +76,9 @@ class StoryViewModel @Inject constructor(
                                 viewModelScope.launch {
                                     if (utteranceId.startsWith("sentence_") && currentSentenceIndex < sentences.size) {
                                         _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                            currentSpokenWord = sentences[currentSentenceIndex]
-                                        ) ?: _uiState.value
+                                            currentSpokenWord = sentences[currentSentenceIndex],
+                                            isSpeaking = true
+                                        ) as UiState ?: _uiState.value
                                     }
                                 }
                             }
@@ -84,12 +88,19 @@ class StoryViewModel @Inject constructor(
                                     currentSentenceIndex++
                                     speakNextSentence()
                                 } else {
+                                    // Сохраняем последнее произнесенное предложение
+                                    if (currentSentenceIndex < sentences.size) {
+                                        lastHighlightedSentence = sentences[currentSentenceIndex]
+                                    }
+
                                     isSpeaking = false
                                     currentSentenceIndex = 0
                                     viewModelScope.launch {
                                         _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                            currentSpokenWord = ""
-                                        ) ?: _uiState.value
+                                            currentSpokenWord = "",
+                                            lastHighlightedSentence = lastHighlightedSentence,
+                                            isSpeaking = false
+                                        ) as UiState ?: _uiState.value
                                     }
                                 }
                             }
@@ -99,8 +110,9 @@ class StoryViewModel @Inject constructor(
                                 currentSentenceIndex = 0
                                 viewModelScope.launch {
                                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                        currentSpokenWord = ""
-                                    ) ?: _uiState.value
+                                        currentSpokenWord = "",
+                                        isSpeaking = false
+                                    ) as UiState ?: _uiState.value
                                 }
                             }
                         })
@@ -264,7 +276,9 @@ class StoryViewModel @Inject constructor(
                         selectedWords = availableWords,
                         isRussian = false,
                         currentSpokenWord = "",
-                        generationTime = 0.0
+                        lastHighlightedSentence = "",
+                        generationTime = 0.0,
+                        isSpeaking = false
                     )
                     Log.d(TAG, "Story generation completed successfully")
 
@@ -287,7 +301,9 @@ class StoryViewModel @Inject constructor(
                             selectedWords = availableWords,
                             isRussian = false,
                             currentSpokenWord = "",
-                            generationTime = 0.0
+                            lastHighlightedSentence = "",
+                            generationTime = 0.0,
+                            isSpeaking = false
                         )
                         Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
 
@@ -436,6 +452,14 @@ class StoryViewModel @Inject constructor(
                     0
                 }
 
+                // Обновляем UI состояние
+                viewModelScope.launch {
+                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                        isSpeaking = true,
+                        lastHighlightedSentence = ""  // Сбрасываем последнее подсвеченное предложение
+                    ) as UiState ?: _uiState.value
+                }
+
                 speakNextSentence()
             }
         } catch (e: Exception) {
@@ -454,7 +478,7 @@ class StoryViewModel @Inject constructor(
                 viewModelScope.launch {
                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = sentence
-                    ) ?: _uiState.value
+                    ) as UiState ?: _uiState.value
                 }
 
                 tts?.speak(cleanTextForSpeech(sentence), TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
@@ -477,14 +501,23 @@ class StoryViewModel @Inject constructor(
 
     fun stopSpeaking() {
         try {
+            // Сохраняем текущее предложение перед остановкой
+            if (currentSentenceIndex < sentences.size) {
+                lastHighlightedSentence = sentences[currentSentenceIndex]
+
+                // Обновляем UI, сохраняя подсветку при остановке
+                viewModelScope.launch {
+                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                        // Оставляем текущее прочитанное предложение подсвеченным при остановке
+                        lastHighlightedSentence = lastHighlightedSentence,
+                        isSpeaking = false
+                    ) as UiState ?: _uiState.value
+                }
+            }
+
             tts?.stop()
             isSpeaking = false
             currentSentenceIndex = 0
-            viewModelScope.launch {
-                _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                    currentSpokenWord = ""
-                ) ?: _uiState.value
-            }
         } catch (e: Exception) {
             _uiState.value = UiState.Error("Error stopping speech: ${e.localizedMessage}")
         }
@@ -555,6 +588,14 @@ class StoryViewModel @Inject constructor(
             }
 
             isSpeaking = true
+
+            // Обновляем UI состояние
+            viewModelScope.launch {
+                _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                    isSpeaking = true
+                ) as UiState ?: _uiState.value
+            }
+
             tts?.speak(cleanTextForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
         } catch (e: Exception) {
             _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
@@ -581,7 +622,9 @@ class StoryViewModel @Inject constructor(
                     russianVersion = "",
                     russianDisplayVersion = "",
                     selectedWords = result.third,
-                    generationTime = generationTime
+                    generationTime = generationTime,
+                    isSpeaking = false,
+                    lastHighlightedSentence = ""
                 )
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.message ?: "Unknown error occurred")
@@ -614,21 +657,33 @@ class StoryViewModel @Inject constructor(
             if (sentences.isNotEmpty()) {
                 isSpeaking = true
 
-                // Определяем начальный индекс
-                currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
-                    val index = sentences.indexOfFirst { sent ->
-                        sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                // Определяем начальный индекс:
+                // 1. Если пользователь выбрал предложение, начинаем с него
+                // 2. Если нет выбранного предложения, но есть последнее подсвеченное - начинаем с него
+                // 3. Иначе начинаем с начала
+                currentSentenceIndex = when {
+                    highlightedSentence.isNotEmpty() -> {
+                        val index = sentences.indexOfFirst { sent ->
+                            sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                        }
+                        if (index >= 0) index else 0
                     }
-                    if (index >= 0) index else 0
-                } else {
-                    0
+                    lastHighlightedSentence.isNotEmpty() -> {
+                        val index = sentences.indexOfFirst { sent ->
+                            sent.replace(SENTENCE_SEPARATOR, "").trim() == lastHighlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                        }
+                        if (index >= 0) index else 0
+                    }
+                    else -> 0
                 }
 
-                // Обновляем UI с первым предложением
+                // Обновляем UI с первым предложением и статусом воспроизведения
                 viewModelScope.launch {
                     _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                        currentSpokenWord = sentences[currentSentenceIndex]
-                    ) ?: _uiState.value
+                        currentSpokenWord = sentences[currentSentenceIndex],
+                        lastHighlightedSentence = "", // Сбрасываем сохраненное предложение при начале чтения
+                        isSpeaking = true
+                    ) as UiState ?: _uiState.value
                 }
 
                 speakNextSentence()
@@ -641,7 +696,7 @@ class StoryViewModel @Inject constructor(
     fun toggleLanguage() {
         val currentState = _uiState.value
         if (currentState is UiState.Success) {
-            _uiState.value = currentState.copy(isTranslating = true)
+            _uiState.value = currentState.copy(isTranslating = true) as UiState
             viewModelScope.launch {
                 // Если переключаемся на русский и перевода еще нет
                 if (!currentState.isRussian && currentState.russianVersion.isEmpty()) {
@@ -688,7 +743,7 @@ class StoryViewModel @Inject constructor(
                             russianDisplayVersion = russianDisplayText, // Без разделителей
                             isRussian = true,
                             isTranslating = false
-                        )
+                        ) as UiState
                     } catch (e: Exception) {
                         Log.e(TAG, "Error translating story", e)
                         _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
@@ -699,7 +754,7 @@ class StoryViewModel @Inject constructor(
                     _uiState.value = currentState.copy(
                         isRussian = !currentState.isRussian,
                         isTranslating = false
-                    )
+                    ) as UiState
                 }
             }
         }

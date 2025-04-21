@@ -33,8 +33,10 @@ sealed class UiState {
         val selectedWords: List<String>,
         val isRussian: Boolean = false,
         val currentSpokenWord: String = "",
+        val lastHighlightedSentence: String = "", // Последнее подсвеченное предложение
         val generationTime: Double = 0.0,
-        val isTranslating: Boolean = false
+        val isTranslating: Boolean = false,
+        val isSpeaking: Boolean = false // Флаг активного воспроизведения текста
     ) : UiState()
 
     /**
