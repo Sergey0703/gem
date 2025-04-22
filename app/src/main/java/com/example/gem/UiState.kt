@@ -36,7 +36,8 @@ sealed class UiState {
         val lastHighlightedSentence: String = "", // Последнее подсвеченное предложение
         val generationTime: Double = 0.0,
         val isTranslating: Boolean = false,
-        val isSpeaking: Boolean = false // Флаг активного воспроизведения текста
+        val isSpeaking: Boolean = false, // Флаг активного воспроизведения текста
+        val lastSpokenWordIndex: Int = 0 // Индекс последнего произнесенного слова
     ) : UiState()
 
     /**

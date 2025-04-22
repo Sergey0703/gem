@@ -352,11 +352,17 @@ fun StoryScreen(
                                             if (state.isSpeaking) {
                                                 storyViewModel.stopSpeaking()
                                             } else {
-                                                storyViewModel.speakTextWithHighlight(
-                                                    context,
-                                                    if (state.isRussian) state.russianVersion else state.englishVersion,
-                                                    highlightedSentence
-                                                )
+                                                if (showSelectedWords) {
+                                                    // Воспроизведение выбранных слов в режиме просмотра слов
+                                                    storyViewModel.speakSelectedWords(context, state.selectedWords)
+                                                } else {
+                                                    // Обычное воспроизведение текста в режиме просмотра истории
+                                                    storyViewModel.speakTextWithHighlight(
+                                                        context,
+                                                        if (state.isRussian) state.russianVersion else state.englishVersion,
+                                                        highlightedSentence
+                                                    )
+                                                }
                                             }
                                         },
                                         modifier = Modifier.align(Alignment.CenterVertically)
@@ -643,31 +649,39 @@ fun StoryScreen(
                                 enter = fadeIn(),
                                 exit = fadeOut()
                             ) {
-                                LazyVerticalGrid(
-                                    columns = GridCells.Adaptive(minSize = 100.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(top = 8.dp)
+                                // Контейнер с сеткой слов и скроллбаром
+                                Box(
+                                    modifier = Modifier.fillMaxSize()
                                 ) {
-                                    items(state.selectedWords) { word ->
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.primaryContainer,
-                                            shape = MaterialTheme.shapes.small,
-                                            modifier = Modifier.clickable {
-                                                selectedWord = word
-                                                storyViewModel.getWordInfoAndUpdate(word) { (transcription, translation, example) ->
-                                                    wordInfo = Triple(transcription, translation, example)
-                                                    showWordDialog = true
+                                    LazyVerticalGrid(
+                                        columns = GridCells.Adaptive(minSize = 100.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(top = 8.dp, end = 12.dp) // Отступ для скроллбара
+                                    ) {
+                                        items(state.selectedWords) { word ->
+                                            Surface(
+                                                color = if (state.currentSpokenWord == word)
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                                else
+                                                    MaterialTheme.colorScheme.primaryContainer,
+                                                shape = MaterialTheme.shapes.small,
+                                                modifier = Modifier.clickable {
+                                                    selectedWord = word
+                                                    storyViewModel.getWordInfoAndUpdate(word) { (transcription, translation, example) ->
+                                                        wordInfo = Triple(transcription, translation, example)
+                                                        showWordDialog = true
+                                                    }
                                                 }
+                                            ) {
+                                                Text(
+                                                    text = word,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
                                             }
-                                        ) {
-                                            Text(
-                                                text = word,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                                            )
                                         }
                                     }
                                 }
