@@ -10,7 +10,10 @@ import com.example.gem.data.Word
 import com.example.gem.data.WordDao
 import com.google.ai.client.generativeai.GenerativeModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,10 +21,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import kotlin.coroutines.CoroutineContext
 
 @HiltViewModel
 class StoryViewModel @Inject constructor(
@@ -42,6 +47,7 @@ class StoryViewModel @Inject constructor(
 
     // Флаг для отслеживания режима чтения
     private var isReadingWords = false
+    private var lastModeWasReadingWords = false
 
     // Для режима чтения слов
     private var currentWordIndex = 0
@@ -51,6 +57,10 @@ class StoryViewModel @Inject constructor(
     // Переменная для сохранения последнего прочитанного предложения
     private var lastHighlightedSentence = ""
 
+    // Состояние TTS инициализации
+    private var isTtsInitialized = false
+    private var ttsInitializationInProgress = false
+
     // Специальный разделитель предложений
     private val SENTENCE_SEPARATOR = "<<SENTENCE_END>>"
 
@@ -58,6 +68,14 @@ class StoryViewModel @Inject constructor(
     private val STORY_WORDS_COUNT = 300
     // Максимальное количество слов, которое будет получено из базы данных
     private val MAX_WORDS_TO_FETCH = 300
+
+    // Обработчик ошибок для корутин
+    private val errorHandler = CoroutineExceptionHandler { _, exception ->
+        Log.e(TAG, "Coroutine exception: ${exception.message}", exception)
+        viewModelScope.launch {
+            _uiState.value = UiState.Error("Error occurred: ${exception.localizedMessage}")
+        }
+    }
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-2.0-flash",
@@ -74,72 +92,135 @@ class StoryViewModel @Inject constructor(
         tts?.setSpeechRate(rate)
     }
 
+    // Полностью сбрасываем TTS и пересоздаем его
+    private fun resetTTS(context: Context) {
+        try {
+            tts?.stop()
+            tts?.shutdown()
+            tts = null
+            isTtsInitialized = false
+            initializeTTS(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resetting TTS: ${e.message}")
+        }
+    }
+
+    // Установка обработчика событий для чтения текста
+    private fun setTextReadingListener() {
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String) {
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob()) {
+                    if (utteranceId.startsWith("sentence_") && currentSentenceIndex < sentences.size) {
+                        val updatedState = (_uiState.value as? UiState.Success)?.copy(
+                            currentSpokenWord = sentences[currentSentenceIndex],
+                            isSpeaking = true
+                        )
+                        if (updatedState != null) {
+                            _uiState.value = updatedState
+                        }
+                    }
+                }
+            }
+
+            override fun onDone(utteranceId: String) {
+                if (isReadingWords) {
+                    // Для режима чтения слов отдельная логика не нужна здесь,
+                    // так как она выполняется в speakSelectedWords
+                    return
+                } else if (utteranceId.startsWith("sentence_") && isSpeaking && currentSentenceIndex < sentences.size - 1) {
+                    // Логика для последовательного чтения предложений текста
+                    currentSentenceIndex++
+                    speakNextSentence()
+                } else if (utteranceId.startsWith("sentence_")) {
+                    // Сохраняем последнее произнесенное предложение
+                    if (currentSentenceIndex < sentences.size) {
+                        lastHighlightedSentence = sentences[currentSentenceIndex]
+                    }
+
+                    isSpeaking = false
+                    currentSentenceIndex = 0
+                    viewModelScope.launch(Dispatchers.Main + SupervisorJob()) {
+                        val updatedState = (_uiState.value as? UiState.Success)?.copy(
+                            currentSpokenWord = "",
+                            lastHighlightedSentence = lastHighlightedSentence,
+                            isSpeaking = false
+                        )
+                        if (updatedState != null) {
+                            _uiState.value = updatedState
+                        }
+                    }
+                }
+            }
+
+            override fun onError(utteranceId: String) {
+                isSpeaking = false
+                currentSentenceIndex = 0
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob()) {
+                    val updatedState = (_uiState.value as? UiState.Success)?.copy(
+                        currentSpokenWord = "",
+                        isSpeaking = false
+                    )
+                    if (updatedState != null) {
+                        _uiState.value = updatedState
+                    }
+                }
+            }
+        })
+    }
+
     fun initializeTTS(context: Context) {
-        if (tts == null) {
+        // Предотвращаем одновременную инициализацию
+        if (ttsInitializationInProgress) {
+            return
+        }
+
+        // Если TTS уже инициализирован, ничего не делаем
+        if (isTtsInitialized && tts != null) {
+            return
+        }
+
+        ttsInitializationInProgress = true
+
+        viewModelScope.launch(Dispatchers.IO + SupervisorJob() + errorHandler) {
             try {
-                tts = TextToSpeech(context) { status ->
-                    if (status == TextToSpeech.SUCCESS) {
-                        tts?.language = Locale.US
-                        tts?.setSpeechRate(speechRate)
-                        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                            override fun onStart(utteranceId: String) {
-                                viewModelScope.launch {
-                                    if (utteranceId.startsWith("sentence_") && currentSentenceIndex < sentences.size && !isReadingWords) {
-                                        _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                            currentSpokenWord = sentences[currentSentenceIndex],
-                                            isSpeaking = true
-                                        ) as UiState ?: _uiState.value
-                                    }
-                                    // Обработка для режима слов не нужна здесь, так как она выполняется в speakSelectedWords
-                                }
-                            }
+                // Используем CountDownLatch для ожидания инициализации TTS
+                val initLatch = CountDownLatch(1)
+                var initSuccess = false
 
-                            override fun onDone(utteranceId: String) {
-                                if (isReadingWords) {
-                                    // Для режима чтения слов отдельная логика не нужна здесь,
-                                    // так как она выполняется в speakSelectedWords
-                                    return
-                                } else if (utteranceId.startsWith("sentence_") && isSpeaking && currentSentenceIndex < sentences.size - 1) {
-                                    // Логика для последовательного чтения предложений текста
-                                    currentSentenceIndex++
-                                    speakNextSentence()
-                                } else if (utteranceId.startsWith("sentence_")) {
-                                    // Сохраняем последнее произнесенное предложение
-                                    if (currentSentenceIndex < sentences.size) {
-                                        lastHighlightedSentence = sentences[currentSentenceIndex]
-                                    }
+                withContext(Dispatchers.Main) {
+                    tts = TextToSpeech(context) { status ->
+                        initSuccess = status == TextToSpeech.SUCCESS
+                        if (initSuccess) {
+                            tts?.language = Locale.US
+                            tts?.setSpeechRate(speechRate)
+                            setTextReadingListener()
+                            isTtsInitialized = true
+                        } else {
+                            Log.e(TAG, "TTS initialization failed with status $status")
+                        }
+                        initLatch.countDown()
+                    }
+                }
 
-                                    isSpeaking = false
-                                    currentSentenceIndex = 0
-                                    viewModelScope.launch {
-                                        _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                            currentSpokenWord = "",
-                                            lastHighlightedSentence = lastHighlightedSentence,
-                                            isSpeaking = false
-                                        ) as UiState ?: _uiState.value
-                                    }
-                                }
-                            }
+                // Ждем инициализации с таймаутом
+                val initialized = withContext(Dispatchers.IO) {
+                    initLatch.await(5, TimeUnit.SECONDS)
+                    initSuccess
+                }
 
-                            override fun onError(utteranceId: String) {
-                                isSpeaking = false
-                                isReadingWords = false
-                                currentSentenceIndex = 0
-                                viewModelScope.launch {
-                                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                                        currentSpokenWord = "",
-                                        isSpeaking = false
-                                    ) as UiState ?: _uiState.value
-                                }
-                            }
-                        })
-                    } else {
-                        // Обработка ошибки инициализации TTS
-                        _uiState.value = UiState.Error("Failed to initialize text-to-speech")
+                ttsInitializationInProgress = false
+
+                if (!initialized) {
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = UiState.Error("Failed to initialize text-to-speech within timeout")
                     }
                 }
             } catch (e: Exception) {
-                _uiState.value = UiState.Error("Error initializing text-to-speech: ${e.localizedMessage}")
+                Log.e(TAG, "Error initializing TTS: ${e.message}", e)
+                ttsInitializationInProgress = false
+                withContext(Dispatchers.Main) {
+                    _uiState.value = UiState.Error("Error initializing text-to-speech: ${e.localizedMessage}")
+                }
             }
         }
     }
@@ -147,7 +228,9 @@ class StoryViewModel @Inject constructor(
     private suspend fun getWordsForStory(): List<String> {
         try {
             // Получаем слова из базы данных, отсортированные по дате последнего использования (сначала с NULL)
-            val words = wordDao.getWordsToReview(Date(), MAX_WORDS_TO_FETCH).first()
+            val words = withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
+                wordDao.getWordsToReview(Date(), MAX_WORDS_TO_FETCH).first()
+            }
 
             if (words.isEmpty()) {
                 throw Exception("Dictionary is empty. Please add some words first.")
@@ -252,7 +335,9 @@ class StoryViewModel @Inject constructor(
                 }
 
                 Log.d(TAG, "Generating story - Attempt $attempt of $maxAttempts")
-                val response = generativeModel.generateContent(storyPrompt)
+                val response = withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
+                    generativeModel.generateContent(storyPrompt)
+                }
                 englishStory = response.text?.trim() ?: throw Exception("Empty response from API")
 
                 Log.d(TAG, "Raw API response first 500 chars: ${englishStory.take(500)}")
@@ -347,7 +432,7 @@ class StoryViewModel @Inject constructor(
     // Обновляем даты последнего использования слов
     private suspend fun updateWordUsageDates(words: List<String>) {
         try {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
                 // Получаем все слова из базы данных
                 val allWords = wordDao.getAllWords().first()
                 // Создаем карту английское слово -> id
@@ -425,23 +510,36 @@ class StoryViewModel @Inject constructor(
     }
 
     private fun setTTSLanguage(isRussian: Boolean) {
-        tts?.let { tts ->
-            val locale = if (isRussian) {
-                Locale("ru")
-            } else {
-                Locale.US
+        try {
+            tts?.let { tts ->
+                val locale = if (isRussian) {
+                    Locale("ru")
+                } else {
+                    Locale.US
+                }
+                val result = tts.setLanguage(locale)
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.e(TAG, "Language ${locale.language} is not supported")
+                    viewModelScope.launch(Dispatchers.Main) {
+                        _uiState.value = UiState.Error("Language ${if (isRussian) "Russian" else "English"} is not supported on this device")
+                    }
+                }
             }
-            val result = tts.setLanguage(locale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e(TAG, "Language ${locale.language} is not supported")
-                _uiState.value = UiState.Error("Language ${if (isRussian) "Russian" else "English"} is not supported on this device")
-            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting TTS language: ${e.message}")
+            // Не показываем ошибку пользователю, просто логируем
         }
     }
 
     fun speakText(context: Context, text: String, highlightedSentence: String = "") {
         try {
-            initializeTTS(context)
+            // Проверяем, не был ли последний режим - чтение слов
+            if (lastModeWasReadingWords) {
+                resetTTS(context)
+                lastModeWasReadingWords = false
+            } else {
+                initializeTTS(context)
+            }
 
             if (isSpeaking) {
                 stopSpeaking()
@@ -455,6 +553,35 @@ class StoryViewModel @Inject constructor(
 
             // Устанавливаем режим чтения полного текста
             isReadingWords = false
+
+            // Проверяем инициализацию TTS
+            if (!isTtsInitialized) {
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                    for (i in 1..5) { // Пытаемся 5 раз
+                        delay(500) // Ждем инициализацию
+                        if (isTtsInitialized) break
+                    }
+
+                    if (!isTtsInitialized) {
+                        _uiState.value = UiState.Error("Text-to-speech is not initialized. Please try again.")
+                        return@launch
+                    }
+
+                    continueSpeakText(context, text, highlightedSentence)
+                }
+            } else {
+                continueSpeakText(context, text, highlightedSentence)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in speakText: ${e.message}", e)
+            _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
+        }
+    }
+
+    private fun continueSpeakText(context: Context, text: String, highlightedSentence: String = "") {
+        try {
+            // Устанавливаем обработчик для чтения текста
+            setTextReadingListener()
 
             // Устанавливаем язык в зависимости от текущего состояния
             (_uiState.value as? UiState.Success)?.let { state ->
@@ -475,17 +602,21 @@ class StoryViewModel @Inject constructor(
                 }
 
                 // Обновляем UI состояние
-                viewModelScope.launch {
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                    val updatedState = (_uiState.value as? UiState.Success)?.copy(
                         isSpeaking = true,
                         lastHighlightedSentence = ""  // Сбрасываем последнее подсвеченное предложение
-                    ) as UiState ?: _uiState.value
+                    )
+                    if (updatedState != null) {
+                        _uiState.value = updatedState
+                    }
                 }
 
                 speakNextSentence()
             }
         } catch (e: Exception) {
-            _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
+            Log.e(TAG, "Error in continueSpeakText: ${e.message}", e)
+            _uiState.value = UiState.Error("Error continuing speech: ${e.localizedMessage}")
         }
     }
 
@@ -497,55 +628,92 @@ class StoryViewModel @Inject constructor(
                 Log.d(TAG, "Speaking sentence ${currentSentenceIndex + 1}/${sentences.size}: \"$sentence\"")
 
                 // Обновляем UI с текущим предложением
-                viewModelScope.launch {
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                    val updatedState = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = sentence
-                    ) as UiState ?: _uiState.value
+                    )
+                    if (updatedState != null) {
+                        _uiState.value = updatedState
+                    }
+                }
+
+                // Проверка на случай, если TTS был сброшен
+                if (tts == null || !isTtsInitialized) {
+                    Log.e(TAG, "TTS is null or not initialized when trying to speak")
+                    isSpeaking = false
+                    return
                 }
 
                 tts?.speak(cleanTextForSpeech(sentence), TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error speaking sentence", e)
-            _uiState.value = UiState.Error("Error speaking sentence: ${e.localizedMessage}")
+            isSpeaking = false
+            viewModelScope.launch(Dispatchers.Main) {
+                _uiState.value = UiState.Error("Error speaking sentence: ${e.localizedMessage}")
+            }
         }
     }
 
     fun speakWord(context: Context, word: String) {
-        initializeTTS(context)
-        stopSpeaking()
-        // Устанавливаем язык в зависимости от текущего состояния
-        (_uiState.value as? UiState.Success)?.let { state ->
-            setTTSLanguage(state.isRussian)
+        viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+            initializeTTS(context)
+
+            // Ждем инициализации TTS
+            for (i in 1..5) {
+                if (isTtsInitialized) break
+                delay(200)
+            }
+
+            if (!isTtsInitialized) {
+                _uiState.value = UiState.Error("Could not initialize text-to-speech")
+                return@launch
+            }
+
+            stopSpeaking()
+
+            // Устанавливаем язык в зависимости от текущего состояния
+            (_uiState.value as? UiState.Success)?.let { state ->
+                setTTSLanguage(state.isRussian)
+            }
+
+            tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "single_word")
         }
-        tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "single_word")
     }
 
     fun stopSpeaking() {
         try {
             if (isReadingWords) {
                 // Сохраняем индекс последнего слова
-                viewModelScope.launch {
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                    val updatedState = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = "",
                         isSpeaking = false,
                         lastSpokenWordIndex = currentWordIndex
-                    ) as UiState ?: _uiState.value
+                    )
+                    if (updatedState != null) {
+                        _uiState.value = updatedState
+                    }
                 }
+                lastModeWasReadingWords = true
             } else {
                 // Сохраняем текущее предложение
                 if (currentSentenceIndex < sentences.size) {
                     lastHighlightedSentence = sentences[currentSentenceIndex]
 
                     // Обновляем UI, сохраняя подсветку при остановке
-                    viewModelScope.launch {
-                        _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                    viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                        val updatedState = (_uiState.value as? UiState.Success)?.copy(
                             // Оставляем текущее прочитанное предложение подсвеченным при остановке
                             lastHighlightedSentence = lastHighlightedSentence,
                             isSpeaking = false
-                        ) as UiState ?: _uiState.value
+                        )
+                        if (updatedState != null) {
+                            _uiState.value = updatedState
+                        }
                     }
                 }
+                lastModeWasReadingWords = false
             }
 
             tts?.stop()
@@ -553,7 +721,10 @@ class StoryViewModel @Inject constructor(
             isReadingWords = false
             currentSentenceIndex = 0
         } catch (e: Exception) {
-            _uiState.value = UiState.Error("Error stopping speech: ${e.localizedMessage}")
+            Log.e(TAG, "Error stopping speech: ${e.message}", e)
+            // Не показываем ошибку пользователю, просто останавливаем воспроизведение
+            isSpeaking = false
+            isReadingWords = false
         }
     }
 
@@ -578,7 +749,9 @@ class StoryViewModel @Inject constructor(
         """.trimIndent()
 
         return try {
-            val response = generativeModel.generateContent(prompt).text?.trim() ?: ""
+            val response = withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
+                generativeModel.generateContent(prompt).text?.trim() ?: ""
+            }
 
             // Parse the response
             val transcription = response.substringAfter("TRANSCRIPTION: ")
@@ -594,16 +767,23 @@ class StoryViewModel @Inject constructor(
 
             Triple(transcription, translation, example)
         } catch (e: Exception) {
-            Log.e("StoryViewModel", "Error getting word info: ${e.message}")
+            Log.e("StoryViewModel", "Error getting word info: ${e.message}", e)
             Triple("[${word}]", "Ошибка перевода", "Error getting example")
         }
     }
 
     fun getWordInfoAndUpdate(word: String, onResult: (Triple<String, String, String>) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = getWordInfo(word)
-            withContext(Dispatchers.Main) {
-                onResult(result)
+        viewModelScope.launch(Dispatchers.IO + SupervisorJob() + errorHandler) {
+            try {
+                val result = getWordInfo(word)
+                withContext(Dispatchers.Main) {
+                    onResult(result)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in getWordInfoAndUpdate: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    onResult(Triple("[${word}]", "Ошибка перевода", "Error getting example"))
+                }
             }
         }
     }
@@ -621,25 +801,55 @@ class StoryViewModel @Inject constructor(
                 return
             }
 
+            // Проверяем инициализацию TTS
+            if (!isTtsInitialized) {
+                viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                    for (i in 1..5) { // Пытаемся 5 раз
+                        delay(500) // Ждем инициализацию
+                        if (isTtsInitialized) break
+                    }
+
+                    if (!isTtsInitialized) {
+                        _uiState.value = UiState.Error("Text-to-speech is not initialized. Please try again.")
+                        return@launch
+                    }
+
+                    continueSpeakTextSmooth(text)
+                }
+            } else {
+                continueSpeakTextSmooth(text)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting smooth speech: ${e.message}", e)
+            _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
+        }
+    }
+
+    private fun continueSpeakTextSmooth(text: String) {
+        try {
             // Устанавливаем режим чтения полного текста
             isReadingWords = false
             isSpeaking = true
 
             // Обновляем UI состояние
-            viewModelScope.launch {
-                _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+            viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+                val updatedState = (_uiState.value as? UiState.Success)?.copy(
                     isSpeaking = true
-                ) as UiState ?: _uiState.value
+                )
+                if (updatedState != null) {
+                    _uiState.value = updatedState
+                }
             }
 
             tts?.speak(cleanTextForSpeech(text), TextToSpeech.QUEUE_FLUSH, null, "smooth_reading")
         } catch (e: Exception) {
-            _uiState.value = UiState.Error("Error starting smooth speech: ${e.localizedMessage}")
+            Log.e(TAG, "Error in continueSpeakTextSmooth: ${e.message}", e)
+            isSpeaking = false
         }
     }
 
     fun startStoryGeneration(prompt: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
             _uiState.value = UiState.Loading()
             try {
                 val startTime = System.currentTimeMillis()
@@ -664,176 +874,249 @@ class StoryViewModel @Inject constructor(
                     lastSpokenWordIndex = 0
                 )
             } catch (e: Exception) {
+                Log.e(TAG, "Error generating story: ${e.message}", e)
                 _uiState.value = UiState.Error(e.message ?: "Unknown error occurred")
             }
         }
     }
 
     fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "") {
-        try {
-            initializeTTS(context)
-
-            if (isSpeaking) {
-                stopSpeaking()
-                return
-            }
-
-            val cleanedText = cleanTextForSpeech(text)
-            if (cleanedText.isBlank()) {
-                return
-            }
-
-            // Устанавливаем режим чтения полного текста
-            isReadingWords = false
-
-            // Устанавливаем язык в зависимости от текущего состояния
-            (_uiState.value as? UiState.Success)?.let { state ->
-                setTTSLanguage(state.isRussian)
-            }
-
-            // Разбиваем текст на предложения по разделителям
-            sentences = splitIntoSentences(text)
-
-            if (sentences.isNotEmpty()) {
-                isSpeaking = true
-
-// Определяем начальный индекс:
-                // 1. Если пользователь выбрал предложение, начинаем с него
-                // 2. Если нет выбранного предложения, но есть последнее подсвеченное - начинаем с него
-                // 3. Иначе начинаем с начала
-                currentSentenceIndex = when {
-                    highlightedSentence.isNotEmpty() -> {
-                        val index = sentences.indexOfFirst { sent ->
-                            sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
-                        }
-                        if (index >= 0) index else 0
-                    }
-                    lastHighlightedSentence.isNotEmpty() -> {
-                        val index = sentences.indexOfFirst { sent ->
-                            sent.replace(SENTENCE_SEPARATOR, "").trim() == lastHighlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
-                        }
-                        if (index >= 0) index else 0
-                    }
-                    else -> 0
+        viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
+            try {
+                // Проверяем, не был ли последний режим - чтение слов
+                if (lastModeWasReadingWords) {
+                    resetTTS(context)
+                    lastModeWasReadingWords = false
+                } else {
+                    initializeTTS(context)
                 }
 
-                // Обновляем UI с первым предложением и статусом воспроизведения
-                viewModelScope.launch {
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
+                if (isSpeaking) {
+                    stopSpeaking()
+                    return@launch
+                }
+
+                val cleanedText = cleanTextForSpeech(text)
+                if (cleanedText.isBlank()) {
+                    return@launch
+                }
+
+                // Ждем инициализации TTS
+                for (i in 1..5) {
+                    if (isTtsInitialized) break
+                    delay(200)
+                }
+
+                if (!isTtsInitialized) {
+                    _uiState.value = UiState.Error("Could not initialize text-to-speech")
+                    return@launch
+                }
+
+                // Устанавливаем режим чтения полного текста
+                isReadingWords = false
+
+                // Устанавливаем обработчик для чтения текста
+                setTextReadingListener()
+
+                // Устанавливаем язык в зависимости от текущего состояния
+                (_uiState.value as? UiState.Success)?.let { state ->
+                    setTTSLanguage(state.isRussian)
+                }
+
+                // Разбиваем текст на предложения по разделителям
+                sentences = splitIntoSentences(text)
+
+                if (sentences.isNotEmpty()) {
+                    isSpeaking = true
+
+                    // Определяем начальный индекс:
+                    // 1. Если пользователь выбрал предложение, начинаем с него
+                    // 2. Если нет выбранного предложения, но есть последнее подсвеченное - начинаем с него
+                    // 3. Иначе начинаем с начала
+                    currentSentenceIndex = when {
+                        highlightedSentence.isNotEmpty() -> {
+                            val index = sentences.indexOfFirst { sent ->
+                                sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                            }
+                            if (index >= 0) index else 0
+                        }
+                        lastHighlightedSentence.isNotEmpty() -> {
+                            val index = sentences.indexOfFirst { sent ->
+                                sent.replace(SENTENCE_SEPARATOR, "").trim() == lastHighlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                            }
+                            if (index >= 0) index else 0
+                        }
+                        else -> 0
+                    }
+
+                    // Обновляем UI с первым предложением и статусом воспроизведения
+                    val updatedState = (_uiState.value as? UiState.Success)?.copy(
                         currentSpokenWord = sentences[currentSentenceIndex],
                         lastHighlightedSentence = "", // Сбрасываем сохраненное предложение при начале чтения
                         isSpeaking = true
-                    ) as UiState ?: _uiState.value
-                }
+                    )
+                    if (updatedState != null) {
+                        _uiState.value = updatedState
+                    }
 
-                speakNextSentence()
+                    speakNextSentence()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in speakTextWithHighlight: ${e.message}", e)
+                _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
             }
-        } catch (e: Exception) {
-            _uiState.value = UiState.Error("Error starting speech: ${e.localizedMessage}")
         }
     }
 
     // Новая функция для воспроизведения выбранных слов
     fun speakSelectedWords(context: Context, words: List<String>) {
-        initializeTTS(context)
-
-        if (isSpeaking) {
-            stopSpeaking()
-            return
-        }
-
-        if (words.isEmpty()) return
-
-        // Получаем текущее состояние
-        val currentState = _uiState.value as? UiState.Success ?: return
-
-        // Устанавливаем режим чтения отдельных слов
-        isReadingWords = true
-
-        // Устанавливаем язык
-        setTTSLanguage(false) // Всегда используем английский для слов
-
-        // Сохраняем список слов
-        selectedWords = words
-
-        // Начинаем с последнего произнесенного слова или с начала
-        currentWordIndex = currentState.lastSpokenWordIndex
-
-        // Проверяем, что индекс находится в пределах списка
-        if (currentWordIndex >= words.size) {
-            currentWordIndex = 0
-        }
-
-        // Обновляем состояние UI
-        viewModelScope.launch {
-            _uiState.value = currentState.copy(
-                isSpeaking = true,
-                currentSpokenWord = words[currentWordIndex]
-            ) as UiState
-        }
-
-        // Запускаем корутину для последовательного воспроизведения
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
             try {
+                // Полностью сбрасываем TTS при переходе к режиму чтения слов
+                resetTTS(context)
+
+                if (isSpeaking) {
+                    stopSpeaking()
+                    return@launch
+                }
+
+                if (words.isEmpty()) return@launch
+
+                // Ждем инициализации TTS
+                for (i in 1..5) {
+                    if (isTtsInitialized) break
+                    delay(200)
+                }
+
+                if (!isTtsInitialized) {
+                    _uiState.value = UiState.Error("Could not initialize text-to-speech")
+                    return@launch
+                }
+
+                // Получаем текущее состояние
+                val currentState = _uiState.value as? UiState.Success ?: return@launch
+
+                // Устанавливаем режим чтения отдельных слов
+                isReadingWords = true
+                lastModeWasReadingWords = true
+
+                // Устанавливаем язык
+                setTTSLanguage(false) // Всегда используем английский для слов
+
+                // Сохраняем список слов
+                selectedWords = words
+
+                // Начинаем с последнего произнесенного слова или с начала
+                currentWordIndex = currentState.lastSpokenWordIndex
+
+                // Проверяем, что индекс находится в пределах списка
+                if (currentWordIndex >= words.size) {
+                    currentWordIndex = 0
+                }
+
+                // Обновляем состояние UI
+                val updatedState = currentState.copy(
+                    isSpeaking = true,
+                    currentSpokenWord = words[currentWordIndex]
+                )
+                _uiState.value = updatedState
+
+                // Создаем собственный обработчик событий для слов
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String) {}
+
+                    override fun onDone(utteranceId: String) {
+                        if (utteranceId.startsWith("word_")) {
+                            // Ничего не делаем - управление циклом через корутину
+                        }
+                    }
+
+                    override fun onError(utteranceId: String) {
+                        if (utteranceId.startsWith("word_")) {
+                            // Ничего не делаем - ошибки обрабатываются в корутине
+                        }
+                    }
+                })
+
                 isSpeaking = true
 
-                while (isSpeaking && isReadingWords) {
-                    if (currentWordIndex >= words.size) {
-                        currentWordIndex = 0  // Начинаем сначала, если дошли до конца списка
-                    }
+                // Используем withContext для выполнения в фоновом потоке
+                withContext(Dispatchers.Default + SupervisorJob() + errorHandler) {
+                    try {
+                        while (isSpeaking && isReadingWords) {
+                            if (currentWordIndex >= words.size) {
+                                currentWordIndex = 0  // Начинаем сначала, если дошли до конца списка
+                            }
 
-                    val word = words[currentWordIndex]
+                            val word = words[currentWordIndex]
 
-                    // Обновляем текущее слово в UI
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                        currentSpokenWord = word
-                    ) as UiState ?: _uiState.value
+                            // Обновляем текущее слово в UI
+                            withContext(Dispatchers.Main) {
+                                val state = (_uiState.value as? UiState.Success)?.copy(
+                                    currentSpokenWord = word
+                                )
+                                if (state != null) {
+                                    _uiState.value = state
+                                }
+                            }
 
-                    // Произносим слово
-                    val latch = CountDownLatch(1)
-                    tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String) {}
+                            // Произносим слово
+                            val latch = CountDownLatch(1)
 
-                        override fun onDone(utteranceId: String) {
-                            if (utteranceId.startsWith("word_")) {
-                                latch.countDown()
+                            withContext(Dispatchers.Main) {
+                                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                                    override fun onStart(utteranceId: String) {}
+
+                                    override fun onDone(utteranceId: String) {
+                                        if (utteranceId.startsWith("word_")) {
+                                            latch.countDown()
+                                        }
+                                    }
+
+                                    override fun onError(utteranceId: String) {
+                                        if (utteranceId.startsWith("word_")) {
+                                            latch.countDown()
+                                        }
+                                    }
+                                })
+
+                                tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_${System.currentTimeMillis()}")
+                            }
+
+                            // Ждем окончания произношения и делаем паузу в 1 секунду
+                            withTimeout(5000) { // Таймаут 5 секунд
+                                latch.await()
+                            }
+
+                            // Пауза между словами только если все еще в режиме чтения слов
+                            if (isSpeaking && isReadingWords) {
+                                delay(1000)  // Пауза между словами
+                                currentWordIndex++  // Переходим к следующему слову
+                            } else {
+                                break  // Выходим из цикла, если чтение остановлено
                             }
                         }
-
-                        override fun onError(utteranceId: String) {
-                            if (utteranceId.startsWith("word_")) {
-                                latch.countDown()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error in word reading loop: ${e.message}", e)
+                    } finally {
+                        // По окончании цикла обновляем UI
+                        withContext(Dispatchers.Main) {
+                            if (!isSpeaking || !isReadingWords) {
+                                val state = (_uiState.value as? UiState.Success)?.copy(
+                                    currentSpokenWord = "",
+                                    isSpeaking = false,
+                                    lastSpokenWordIndex = currentWordIndex
+                                )
+                                if (state != null) {
+                                    _uiState.value = state
+                                }
                             }
                         }
-                    })
-
-                    tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_${System.currentTimeMillis()}")
-
-                    // Ждем окончания произношения и делаем паузу в 1 секунду
-                    latch.await(5, TimeUnit.SECONDS)  // Таймаут 5 секунд на всякий случай
-
-                    // Пауза между словами только если все еще в режиме чтения слов
-                    if (isSpeaking && isReadingWords) {
-                        delay(1000)  // Пауза между словами
-                        currentWordIndex++  // Переходим к следующему слову
-                    } else {
-                        break  // Выходим из цикла, если чтение остановлено
                     }
                 }
-
-                // По окончании цикла обновляем UI
-                if (!isSpeaking || !isReadingWords) {
-                    _uiState.value = (_uiState.value as? UiState.Success)?.copy(
-                        currentSpokenWord = "",
-                        isSpeaking = false,
-                        lastSpokenWordIndex = currentWordIndex
-                    ) as UiState ?: _uiState.value
-                }
-
             } catch (e: Exception) {
-                Log.e(TAG, "Error while speaking words: ${e.message}")
-                isReadingWords = false
-                stopSpeaking()
+                Log.e(TAG, "Error in speakSelectedWords: ${e.message}", e)
+                _uiState.value = UiState.Error("Error speaking words: ${e.localizedMessage}")
             }
         }
     }
@@ -842,7 +1125,7 @@ class StoryViewModel @Inject constructor(
         val currentState = _uiState.value
         if (currentState is UiState.Success) {
             _uiState.value = currentState.copy(isTranslating = true) as UiState
-            viewModelScope.launch {
+            viewModelScope.launch(Dispatchers.IO + SupervisorJob() + errorHandler) {
                 // Если переключаемся на русский и перевода еще нет
                 if (!currentState.isRussian && currentState.russianVersion.isEmpty()) {
                     try {
@@ -883,23 +1166,31 @@ class StoryViewModel @Inject constructor(
                         Log.d(TAG, "Translation received")
                         Log.d(TAG, "Russian story length: ${russianStory.length}")
 
-                        _uiState.value = currentState.copy(
-                            russianVersion = russianStory, // С разделителями
-                            russianDisplayVersion = russianDisplayText, // Без разделителей
-                            isRussian = true,
-                            isTranslating = false
-                        ) as UiState
+                        withContext(Dispatchers.Main) {
+                            val updatedState = currentState.copy(
+                                russianVersion = russianStory, // С разделителями
+                                russianDisplayVersion = russianDisplayText, // Без разделителей
+                                isRussian = true,
+                                isTranslating = false
+                            )
+                            _uiState.value = updatedState
+                        }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error translating story", e)
-                        _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = UiState.Error("Error translating story: ${e.localizedMessage}")
+                        }
                     }
                 } else {
                     // Просто переключаем язык, если перевод уже есть
                     delay(500) // Небольшая задержка для анимации
-                    _uiState.value = currentState.copy(
-                        isRussian = !currentState.isRussian,
-                        isTranslating = false
-                    ) as UiState
+                    withContext(Dispatchers.Main) {
+                        val updatedState = currentState.copy(
+                            isRussian = !currentState.isRussian,
+                            isTranslating = false
+                        )
+                        _uiState.value = updatedState
+                    }
                 }
             }
         }
@@ -909,11 +1200,14 @@ class StoryViewModel @Inject constructor(
         try {
             isSmoothReading = false
             isReadingWords = false
+            lastModeWasReadingWords = false
             stopSpeaking()
             tts?.shutdown()
             tts = null
+            isTtsInitialized = false
         } catch (e: Exception) {
             // Игнорируем ошибки при закрытии
+            Log.e(TAG, "Error in onCleared: ${e.message}", e)
         }
         super.onCleared()
     }
