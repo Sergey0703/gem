@@ -62,6 +62,17 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.graphicsLayer
 
 // Расширение для Char для определения знаков пунктуации
 fun Char.isPunctuation(): Boolean {
@@ -91,65 +102,82 @@ fun VerticalScrollbar(
     thumbColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant
 ) {
+    // Показываем скроллбар только если есть что прокручивать
     if (scrollState.maxValue > 0) {
+        // Получаем размеры и позицию через onGloballyPositioned
+        var trackHeight by remember { mutableStateOf(0) }
+
         Box(
             modifier = modifier
                 .width(width)
                 .fillMaxHeight()
                 .background(trackColor, shape = RoundedCornerShape(4.dp))
+                .onGloballyPositioned { coordinates ->
+                    // Запоминаем фактическую высоту трека скроллбара в пикселях
+                    trackHeight = coordinates.size.height
+                }
         ) {
-            // Расчет размера ползунка (соотношение)
-            val thumbSizeRatio = (scrollState.viewportSize.toFloat() /
-                    (scrollState.maxValue + scrollState.viewportSize))
+            // Размер ползунка (процент от высоты трека)
+            val thumbSizePercent = 0.06f
 
-            // Минимальный размер ползунка (15% от высоты)
-            val minThumbSizeRatio = 0.15f
+            // Высота ползунка в пикселях
+            val thumbHeightPx = (trackHeight * thumbSizePercent).toInt()
 
-            // Используем максимальное из вычисленного размера и минимума
-            val effectiveThumbSizeRatio = if (thumbSizeRatio < minThumbSizeRatio)
-                minThumbSizeRatio else thumbSizeRatio
+            // Максимальное смещение ползунка в пикселях
+            val maxOffsetPx = trackHeight - thumbHeightPx
 
-            // Рассчитываем максимальный диапазон перемещения (1.0 - размер ползунка)
-            val availableScrollRange = 1f - effectiveThumbSizeRatio
+            // Прогресс прокрутки (0.0 - 1.0)
+            val scrollProgress = scrollState.value.toFloat() / scrollState.maxValue.toFloat()
 
-            // Текущая позиция (от 0 до 1)
-            val scrollRatio = if (scrollState.maxValue > 0)
-                scrollState.value.toFloat() / scrollState.maxValue else 0f
+            // Позиция ползунка в пикселях
+            val thumbOffsetPx = (scrollProgress * maxOffsetPx).toInt()
 
-            // Позиция ползунка (учитываем размер и не выходим за границы)
-            val thumbPosition = scrollRatio * availableScrollRange
+            // Логируем значения для отладки
+            Log.d("VerticalScrollbar", "trackHeight: $trackHeight")
+            Log.d("VerticalScrollbar", "thumbHeightPx: $thumbHeightPx")
+            Log.d("VerticalScrollbar", "maxOffsetPx: $maxOffsetPx")
+            Log.d("VerticalScrollbar", "scrollProgress: $scrollProgress")
+            Log.d("VerticalScrollbar", "thumbOffsetPx: $thumbOffsetPx")
 
-            // Рисуем ползунок
+            // Рисуем ползунок с использованием graphicsLayer для более точного позиционирования
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(effectiveThumbSizeRatio)
-                    .offset(y = (thumbPosition * 100).roundToInt().dp)
-                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(4.dp))
+                    .fillMaxWidth(0.7f)
+                    .height((thumbHeightPx / LocalDensity.current.density).dp)
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer {
+                        translationY = thumbOffsetPx.toFloat()
+                    }
+                    .shadow(elevation = 1.dp, shape = RoundedCornerShape(4.dp))
                     .background(thumbColor, RoundedCornerShape(4.dp))
             )
 
-            // Маркер текущего предложения (если есть)
+            // Индикатор текущего предложения (если есть)
             if (currentSentenceIndex >= 0 && sentences.isNotEmpty()) {
-                // Позиция для маркера (от 0 до 1)
-                val sentenceRatio = if (sentences.size > 1)
-                    currentSentenceIndex.toFloat() / (sentences.size - 1) else 0f
+                val sentenceProgress = if (sentences.size > 1)
+                    currentSentenceIndex.toFloat() / (sentences.size - 1).toFloat()
+                else
+                    0f
 
-                // Создаем маркер текущего предложения
+                val markerOffsetPx = (sentenceProgress * trackHeight).toInt()
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(4.dp)
-                        .offset(y = (sentenceRatio * 100).roundToInt().dp)
+                        .height(2.dp)
+                        .graphicsLayer {
+                            translationY = markerOffsetPx.toFloat()
+                        }
                         .background(
                             MaterialTheme.colorScheme.tertiary,
-                            RoundedCornerShape(2.dp)
+                            RoundedCornerShape(1.dp)
                         )
                 )
             }
         }
     }
 }
+
 @Composable
 fun StoryScreen(
     storyViewModel: StoryViewModel = hiltViewModel()
