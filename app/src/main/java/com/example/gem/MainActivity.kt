@@ -22,6 +22,9 @@ import androidx.navigation.compose.rememberNavController
 import com.example.gem.ui.theme.GemTheme
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -76,19 +79,35 @@ class MainActivity : ComponentActivity() {
                         else -> {}
                     }
                 }
-
                 Scaffold(
                     bottomBar = {
-                        NavigationBar {
+                        NavigationBar(
+                            modifier = Modifier.height(48.dp), // Уменьшенная высота (стандартная обычно 56dp или больше)
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 0.dp // Убираем тень для более плоского вида
+                        ) {
                             items.forEachIndexed { index, item ->
                                 NavigationBarItem(
                                     icon = {
                                         when (index) {
-                                            0 -> Icon(Icons.Default.MenuBook, contentDescription = item)
-                                            1 -> Icon(Icons.Default.Book, contentDescription = item)
+                                            0 -> Icon(
+                                                Icons.Default.MenuBook,
+                                                contentDescription = item,
+                                                modifier = Modifier.size(20.dp) // Уменьшенный размер иконки
+                                            )
+                                            1 -> Icon(
+                                                Icons.Default.Book,
+                                                contentDescription = item,
+                                                modifier = Modifier.size(20.dp) // Уменьшенный размер иконки
+                                            )
                                         }
                                     },
-                                    label = { Text(item) },
+                                    label = {
+                                        Text(
+                                            item,
+                                            style = MaterialTheme.typography.bodySmall // Уменьшенный текст
+                                        )
+                                    },
                                     selected = selectedItem == index,
                                     onClick = {
                                         selectedItem = index
@@ -108,7 +127,10 @@ class MainActivity : ComponentActivity() {
                                                 restoreState = true
                                             }
                                         }
-                                    }
+                                    },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
                                 )
                             }
                         }
