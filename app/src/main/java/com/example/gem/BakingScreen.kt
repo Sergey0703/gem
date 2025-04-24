@@ -421,6 +421,7 @@ fun StoryScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 4.dp) // Уменьшенный вертикальный отступ
                 ) {
+                    ///////////
                     // Story display card
                     Card(
                         modifier = Modifier
@@ -430,7 +431,7 @@ fun StoryScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp)
+                                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 8.dp) // Уменьшенный верхний отступ с 16dp до 8dp
                         ) {
                             // Вычисляем текущее предложение и общее количество
                             val textWithSeparators = if (state.isRussian) state.russianVersion else state.englishVersion
@@ -448,7 +449,9 @@ fun StoryScreen(
 
                             // Исправленный блок с элементами управления
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp), // Добавлен небольшой отступ снизу для строки с элементами управления
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -533,6 +536,7 @@ fun StoryScreen(
                                     }
                                 }
                             }
+                    //////////
                             AnimatedVisibility(
                                 visible = !showSelectedWords,
                                 enter = fadeIn(),
