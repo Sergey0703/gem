@@ -329,7 +329,7 @@ fun StoryScreen(
         Text(
             text = stringResource(R.string.app_title),
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp) // Уменьшенный вертикальный отступ
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp) // Уменьшенный вертикальный отступ
         )
 
         when (val state = uiState) {
