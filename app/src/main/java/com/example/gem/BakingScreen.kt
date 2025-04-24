@@ -116,7 +116,7 @@ fun VerticalScrollbar(
                 }
         ) {
             // Размер ползунка (процент от высоты трека)
-            val thumbSizePercent = 0.06f
+            val thumbSizePercent = 0.04f
 
             // Высота ползунка в пикселях
             val thumbHeightPx = (trackHeight * thumbSizePercent).toInt()
@@ -150,7 +150,7 @@ fun VerticalScrollbar(
                     .background(thumbColor, RoundedCornerShape(4.dp))
             )
 
-            // Индикатор текущего предложения (если есть)
+            // Current sentence position indicator
             if (currentSentenceIndex >= 0 && sentences.isNotEmpty()) {
                 val sentenceProgress = if (sentences.size > 1)
                     currentSentenceIndex.toFloat() / (sentences.size - 1).toFloat()
@@ -161,14 +161,18 @@ fun VerticalScrollbar(
 
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
+                        .fillMaxWidth(1f)  // Increased width to 90% of the scrollbar
+                        .height(10.dp)  // Increased height for better visibility
                         .graphicsLayer {
                             translationY = markerOffsetPx.toFloat()
                         }
+                        .shadow(
+                            elevation = 2.dp,
+                            shape = RoundedCornerShape(3.dp)
+                        )
                         .background(
-                            MaterialTheme.colorScheme.tertiary,
-                            RoundedCornerShape(1.dp)
+                            Color.Yellow.copy(alpha = 0.8f),  // Bright yellow with slight transparency
+                            RoundedCornerShape(3.dp)
                         )
                 )
             }
@@ -536,7 +540,7 @@ fun StoryScreen(
                                     }
                                 }
                             }
-                    //////////
+                            //////////
                             AnimatedVisibility(
                                 visible = !showSelectedWords,
                                 enter = fadeIn(),
