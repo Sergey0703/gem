@@ -177,7 +177,6 @@ fun VerticalScrollbar(
         }
     }
 }
-
 @Composable
 fun StoryScreen(
     storyViewModel: StoryViewModel = hiltViewModel()
@@ -434,33 +433,56 @@ fun StoryScreen(
                             }.let { if (it >= 0) it + 1 else 0 }
 
                             val totalSentences = sentences.size
-                            val sentenceCounterText = if (currentSentenceIndex > 0 && totalSentences > 0)
-                                " (${currentSentenceIndex}/${totalSentences})" else ""
 
+                            // Исправленный блок с элементами управления
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (showSelectedWords) {
-                                        if (!state.isRussian) "Selected words:" else "Выбранные слова:"
-                                    } else {
-                                        if (!state.isRussian) "Story:$sentenceCounterText" else "История:$sentenceCounterText"
-                                    },
-                                    style = MaterialTheme.typography.titleMedium
-                                )
+                                // Левая часть: Заголовок с номером предложения (если есть)
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Text(
+                                        text = if (showSelectedWords) {
+                                            if (!state.isRussian) "Selected words:" else "Выбранные слова:"
+                                        } else {
+                                            if (!state.isRussian) "Story:" else "История:"
+                                        },
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+
+                                    // Номер предложения только если показываем историю и есть текущее предложение
+                                    if (!showSelectedWords && currentSentenceIndex > 0 && totalSentences > 0) {
+                                        Text(
+                                            text = " ($currentSentenceIndex/$totalSentences)",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                // Правая часть: Элементы управления с фиксированными размерами
+                                Row(
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.wrapContentWidth()
+                                ) {
+                                    // Кнопка показа/скрытия слов (компактная)
                                     TextButton(
                                         onClick = { showSelectedWords = !showSelectedWords },
-                                        modifier = Modifier
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                        modifier = Modifier.padding(end = 2.dp)
                                     ) {
-                                        Text(if (showSelectedWords) "Show story" else "Show words")
+                                        Text(
+                                            text = if (showSelectedWords) "Show story" else "Show words",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
 
+                                    // Слайдер скорости чтения (фиксированная ширина)
                                     Slider(
                                         value = speechRate,
                                         onValueChange = {
@@ -472,16 +494,15 @@ fun StoryScreen(
                                         modifier = Modifier.width(100.dp)
                                     )
 
+                                    // Кнопка воспроизведения/остановки (фиксированный размер)
                                     IconButton(
                                         onClick = {
                                             if (state.isSpeaking) {
                                                 storyViewModel.stopSpeaking()
                                             } else {
                                                 if (showSelectedWords) {
-                                                    // Воспроизведение выбранных слов в режиме просмотра слов
                                                     storyViewModel.speakSelectedWords(context, state.selectedWords)
                                                 } else {
-                                                    // Обычное воспроизведение текста в режиме просмотра истории
                                                     storyViewModel.speakTextWithHighlight(
                                                         context,
                                                         if (state.isRussian) state.russianVersion else state.englishVersion,
@@ -490,11 +511,12 @@ fun StoryScreen(
                                                 }
                                             }
                                         },
-                                        modifier = Modifier.padding(start = 4.dp)
+                                        modifier = Modifier.size(48.dp)
                                     ) {
                                         Icon(
                                             imageVector = if (state.isSpeaking) Icons.Filled.Stop else Icons.Filled.VolumeUp,
-                                            contentDescription = if (state.isSpeaking) "Stop reading" else "Read text with highlighting"
+                                            contentDescription = if (state.isSpeaking) "Stop reading" else "Read text",
+                                            tint = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
