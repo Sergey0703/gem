@@ -69,7 +69,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,7 +90,6 @@ val words = arrayOf(
     "castle",
     "ocean"
 )
-
 @Composable
 fun VerticalScrollbar(
     scrollState: androidx.compose.foundation.ScrollState,
@@ -177,6 +175,7 @@ fun VerticalScrollbar(
         }
     }
 }
+
 @Composable
 fun StoryScreen(
     storyViewModel: StoryViewModel = hiltViewModel()
@@ -263,7 +262,6 @@ fun StoryScreen(
             }
         }
     }
-
     // Диалог с информацией о слове
     if (showWordDialog && selectedWord != null) {
         AlertDialog(
@@ -327,10 +325,11 @@ fun StoryScreen(
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
+        // Уменьшенный отступ для заголовка
         Text(
             text = stringResource(R.string.app_title),
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp) // Уменьшенный вертикальный отступ
         )
 
         when (val state = uiState) {
@@ -338,67 +337,80 @@ fun StoryScreen(
                 // Закомментировали верхнюю карточку с прогрессом, так как теперь используем модальное окно
             }
             is UiState.Success -> {
+                // Более компактная карточка с информацией
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp) // Уменьшенный вертикальный отступ
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 12.dp, vertical = 8.dp) // Меньшие отступы внутри
                     ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        // Первая строка: только Length и Generation time
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Информация о длине и времени (занимает всю строку)
                             Text(
-                                text = "Story generated successfully",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Length: ${if (state.isRussian) state.russianDisplayVersion.length else state.englishDisplayVersion.length}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Words used: ${state.selectedWords.size}/${state.selectedWords.size}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Generation time: ${state.generationTime}s",
+                                text = "Length: ${if (state.isRussian) state.russianDisplayVersion.length else state.englishDisplayVersion.length} | Time: ${String.format("%.1f", state.generationTime)}s",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+
+                        // Вторая строка: Words used, кнопка языка и кнопка Generate
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(
-                                onClick = { storyViewModel.toggleLanguage() },
-                                enabled = !state.isTranslating
+                            // Левая часть - текст о количестве слов
+                            Text(
+                                text = "Words: ${state.selectedWords.size}/${state.selectedWords.size}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f) // Занимает свою часть доступного пространства
+                            )
+
+                            // Средняя часть - кнопка переключения языка (точно посередине)
+                            Box(
+                                modifier = Modifier.weight(1f), // Равный вес для центрирования
+                                contentAlignment = Alignment.Center // Выравнивание содержимого по центру
                             ) {
-                                if (state.isTranslating) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Filled.Language,
-                                        contentDescription = "Toggle language"
-                                    )
+                                IconButton(
+                                    onClick = { storyViewModel.toggleLanguage() },
+                                    enabled = !state.isTranslating,
+                                    modifier = Modifier.size(36.dp) // Меньший размер иконки
+                                ) {
+                                    if (state.isTranslating) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Filled.Language,
+                                            contentDescription = "Toggle language"
+                                        )
+                                    }
                                 }
                             }
 
-                            Button(
-                                onClick = { storyViewModel.startStoryGeneration("") }
+                            // Правая часть - кнопка Generate и пустое пространство для баланса
+                            Box(
+                                modifier = Modifier.weight(1f), // Равный вес для баланса
+                                contentAlignment = Alignment.CenterEnd // Выравнивание содержимого по правому краю
                             ) {
-                                Text("Generate")
+                                Button(
+                                    onClick = { storyViewModel.startStoryGeneration("") },
+                                    modifier = Modifier.height(32.dp), // Более компактная кнопка
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                ) {
+                                    Text("Generate")
+                                }
                             }
                         }
                     }
@@ -407,7 +419,7 @@ fun StoryScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp) // Уменьшенный вертикальный отступ
                 ) {
                     // Story display card
                     Card(
@@ -521,7 +533,6 @@ fun StoryScreen(
                                     }
                                 }
                             }
-
                             AnimatedVisibility(
                                 visible = !showSelectedWords,
                                 enter = fadeIn(),
