@@ -33,7 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.gem.utils.isPunctuation
@@ -52,11 +56,10 @@ fun StoryContent(
     highlightedSentence: String,
     lastHighlightedSentence: String,
     scrollState: androidx.compose.foundation.ScrollState,
-    onSentenceClick: (String, Int) -> Unit, // Updated to include sentence index
+    onSentenceClick: (String, Int) -> Unit,
     onWordLongPress: (String, TextLayoutResult, ((Offset) -> Unit) -> Unit) -> Unit,
     selectedWords: List<String>,
     onWordClick: (String) -> Unit,
-    // Added these parameters for direct index-based highlighting
     highlightedSentenceIndex: Int = -1,
     currentSentenceIndex: Int = -1,
     lastHighlightedSentenceIndex: Int = -1
@@ -95,7 +98,7 @@ fun StoryContent(
                                 mainAxisSpacing = 8.dp
                             ) {
                                 sentences.forEachIndexed { index, sentence ->
-                                    // Determine if current sentence should be highlighted - UPDATED LOGIC
+                                    // Determine if current sentence should be highlighted
                                     val shouldHighlight = when {
                                         // When reading, highlight only current spoken sentence by index
                                         isSpeaking && index == currentSentenceIndex -> true
@@ -122,19 +125,17 @@ fun StoryContent(
                                         else -> false
                                     }
 
-                                    // Log highlight state for debugging
-                                    if (shouldHighlight) {
-                                        Log.d("StoryContent", "Highlighting sentence $index: ${sentence.take(30)}...")
-                                    }
-
-                                    // Display sentence without separators
+                                    // Display sentence without separators but with bold words
                                     val cleanSentence = sentence.replace("<<SENTENCE_END>>", "")
+
+                                    // Create annotated string with bold words instead of starred words
+                                    val annotatedText = createBoldText(cleanSentence)
 
                                     // For tracking text layout and specific word highlighting
                                     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
                                     Text(
-                                        text = cleanSentence + " ",
+                                        text = annotatedText,
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         overflow = TextOverflow.Visible,
@@ -145,7 +146,6 @@ fun StoryContent(
                                                     onTap = {
                                                         // Handle tap only if not currently reading
                                                         if (!isSpeaking) {
-                                                            Log.d("StoryContent", "Tapped on sentence $index: ${cleanSentence.take(30)}...")
                                                             onSentenceClick(sentence, index)
                                                         }
                                                     },
@@ -176,11 +176,14 @@ fun StoryContent(
                             }
                         }
                     } else {
-                        // If splitting failed, display full text
+                        // If splitting failed, display full text with bold words
                         var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
+                        // Create annotated string with bold words
+                        val annotatedText = createBoldText(textForDisplay)
+
                         Text(
-                            text = textForDisplay,
+                            text = annotatedText,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface,
                             overflow = TextOverflow.Visible,
@@ -198,7 +201,6 @@ fun StoryContent(
                                             try {
                                                 val layoutResult = textLayoutResult
                                                 if (layoutResult != null) {
-                                                    // Fix function for handling without suspend
                                                     onWordLongPress(textForDisplay, layoutResult) { handler ->
                                                         handler(offset)
                                                     }
@@ -274,6 +276,37 @@ fun StoryContent(
                     }
                 }
             }
+        }
+    }
+}
+
+// Helper function to create annotated string with bold words instead of starred words
+@Composable
+private fun createBoldText(text: String): AnnotatedString {
+    return buildAnnotatedString {
+        val starPattern = Regex("""\*([^*]+)\*""")
+        var lastEndIndex = 0
+
+        // Find all words with stars and replace them with bold text
+        starPattern.findAll(text).forEach { matchResult ->
+            // Add text before the starred word
+            if (matchResult.range.first > lastEndIndex) {
+                append(text.substring(lastEndIndex, matchResult.range.first))
+            }
+
+            // Add the word with bold style (without stars)
+            val word = matchResult.groupValues[1] // Extract word between stars
+            pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+            append(word)
+            pop()
+
+            // Update last end index
+            lastEndIndex = matchResult.range.last + 1
+        }
+
+        // Add any remaining text
+        if (lastEndIndex < text.length) {
+            append(text.substring(lastEndIndex))
         }
     }
 }
