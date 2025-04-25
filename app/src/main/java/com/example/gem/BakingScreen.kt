@@ -1,5 +1,8 @@
+// app/src/main/java/com/example/gem/BakingScreen.kt
+
 package com.example.gem
 
+import android.util.Log
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,7 +39,7 @@ fun BakingScreen(
     val context = LocalContext.current
     val uiState by storyViewModel.uiState.collectAsState()
 
-    // Специальный разделитель предложений
+    // Special sentence separator
     val sentenceSeparator = "<<SENTENCE_END>>"
 
     var selectedWord by remember { mutableStateOf<String?>(null) }
@@ -44,23 +47,24 @@ fun BakingScreen(
     var showSelectedWords by remember { mutableStateOf(false) }
     var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
     var highlightedSentence by remember { mutableStateOf("") }
+    var highlightedSentenceIndex by remember { mutableStateOf(-1) } // Added to track sentence index
     var speechRate by remember { mutableStateOf(1.0f) }
     var isGenerating by remember { mutableStateOf(false) }
 
-    // Создаем состояние скролла
+    // Create scroll state
     val scrollState = rememberScrollState()
 
-    // Следим за состоянием генерации
+    // Track generation state
     LaunchedEffect(uiState) {
         isGenerating = uiState is UiState.Loading
     }
 
-    // Инициализация TextToSpeech
+    // Initialize TextToSpeech
     LaunchedEffect(Unit) {
         storyViewModel.initializeTTS(context)
     }
 
-    // Отображаем диалог информации о слове
+    // Display word info dialog
     StoryWordInfoDialog(
         show = showWordDialog,
         selectedWord = selectedWord,
@@ -74,7 +78,7 @@ fun BakingScreen(
         }
     )
 
-    // Если идет генерация, показываем оверлей с прогрессом
+    // If generating, show progress overlay
     if (isGenerating && uiState is UiState.Loading) {
         LoadingOverlay(uiState as UiState.Loading)
     }
@@ -82,7 +86,7 @@ fun BakingScreen(
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
-        // Заголовок приложения
+        // App title
         Text(
             text = stringResource(R.string.app_title),
             style = MaterialTheme.typography.titleLarge,
@@ -91,51 +95,53 @@ fun BakingScreen(
 
         when (val state = uiState) {
             is UiState.Loading -> {
-                // Контент загрузки отображается через LoadingOverlay
+                // Loading content is displayed via LoadingOverlay
             }
             is UiState.Success -> {
-                // Заголовок с информацией о тексте
+                // Header with text information
                 StoryHeader(
                     state = state,
                     onGenerateClick = { storyViewModel.startStoryGeneration("") },
                     onLanguageToggleClick = { storyViewModel.toggleLanguage() }
                 )
 
-                // Основное содержимое
+                // Main content
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                 ) {
-                    // Разбиваем текст на предложения
+                    // Split text into sentences
                     val textWithSeparators = if (state.isRussian) state.russianVersion else state.englishVersion
                     val sentences = textWithSeparators.split(sentenceSeparator)
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
-                        .map { it + sentenceSeparator } // Добавляем разделитель обратно для корректного сравнения
+                        .map { it + sentenceSeparator } // Add separator back for correct comparison
 
-                    // Находим текущее предложение
+                    // Find current sentence index based on currentSpokenWord
                     val currentSentenceIndex = sentences.indexOfFirst { sentence ->
                         val cleanSentence = sentence.replace(sentenceSeparator, "").trim()
                         val stateSentence = state.currentSpokenWord.replace(sentenceSeparator, "").trim()
                         cleanSentence == stateSentence
-                    }.let { if (it >= 0) it + 1 else 0 }
+                    }
 
+                    // Current position for display in controls (1-based)
+                    val displayCurrentIndex = if (currentSentenceIndex >= 0) currentSentenceIndex + 1 else 0
                     val totalSentences = sentences.size
 
-                    // Построение заголовка для панели управления
+                    // Build title for control panel
                     val title = if (showSelectedWords) {
                         if (!state.isRussian) "Selected words:" else "Выбранные слова:"
                     } else {
                         if (!state.isRussian) "Story:" else "История:"
                     }
 
-                    // Дополнительная информация для подзаголовка
-                    val subtitleInfo = if (!showSelectedWords && currentSentenceIndex > 0 && totalSentences > 0) {
-                        "$currentSentenceIndex/$totalSentences"
+                    // Additional subtitle info
+                    val subtitleInfo = if (!showSelectedWords && displayCurrentIndex > 0 && totalSentences > 0) {
+                        "$displayCurrentIndex/$totalSentences"
                     } else ""
 
-                    // Содержимое истории
+                    // Story content
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -146,7 +152,7 @@ fun BakingScreen(
                                 .fillMaxSize()
                                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 8.dp)
                         ) {
-                            // Панель управления для истории
+                            // Controls for story
                             StoryControls(
                                 title = title,
                                 subtitleInfo = subtitleInfo,
@@ -168,14 +174,15 @@ fun BakingScreen(
                                             storyViewModel.speakTextWithHighlight(
                                                 context,
                                                 if (state.isRussian) state.russianVersion else state.englishVersion,
-                                                highlightedSentence
+                                                highlightedSentence,
+                                                highlightedSentenceIndex // Pass the sentence index
                                             )
                                         }
                                     }
                                 }
                             )
 
-                            // Основной контент - текст или список слов
+                            // Main content - text or word list
                             StoryContent(
                                 showSelectedWords = showSelectedWords,
                                 sentences = sentences,
@@ -185,8 +192,15 @@ fun BakingScreen(
                                 highlightedSentence = highlightedSentence,
                                 lastHighlightedSentence = state.lastHighlightedSentence,
                                 scrollState = scrollState,
-                                onSentenceClick = { sentence ->
+                                onSentenceClick = { sentence, index -> // Updated to receive index
+                                    // For debuggin
+                                    Log.d("BakingScreen", "Clicked sentence $index: ${sentence.take(30)}...")
+
+                                    // Always save index when selecting a sentence
+                                    highlightedSentenceIndex = if (highlightedSentence == sentence) -1 else index
                                     highlightedSentence = if (highlightedSentence == sentence) "" else sentence
+
+                                    Log.d("BakingScreen", "After click, index=$highlightedSentenceIndex, sentence=${highlightedSentence.take(30)}")
                                 },
                                 onWordLongPress = handleWordLongPress(
                                     storyViewModel = storyViewModel,
@@ -203,7 +217,11 @@ fun BakingScreen(
                                         wordInfo = info
                                         showWordDialog = true
                                     }
-                                }
+                                },
+                                // Added parameters for direct index-based highlighting
+                                highlightedSentenceIndex = highlightedSentenceIndex,
+                                currentSentenceIndex = currentSentenceIndex,
+                                lastHighlightedSentenceIndex = state.lastHighlightedSentenceIndex
                             )
                         }
                     }

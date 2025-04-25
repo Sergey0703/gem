@@ -10,7 +10,6 @@ import com.example.gem.UiState
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -45,6 +44,7 @@ class TextToSpeechUseCase @Inject constructor() {
 
     // Variable to store last read sentence
     private var lastHighlightedSentence = ""
+    private var lastHighlightedSentenceIndex = -1
 
     // TTS initialization state
     private var isTtsInitialized = false
@@ -113,6 +113,7 @@ class TextToSpeechUseCase @Inject constructor() {
                     // Save last spoken sentence
                     if (currentSentenceIndex < sentences.size) {
                         lastHighlightedSentence = sentences[currentSentenceIndex]
+                        lastHighlightedSentenceIndex = currentSentenceIndex
                     }
 
                     isSpeaking = false
@@ -123,6 +124,7 @@ class TextToSpeechUseCase @Inject constructor() {
                                 currentState.copy(
                                     currentSpokenWord = "",
                                     lastHighlightedSentence = lastHighlightedSentence,
+                                    lastHighlightedSentenceIndex = lastHighlightedSentenceIndex, // Added this field
                                     isSpeaking = false
                                 )
                             } else currentState
@@ -227,7 +229,12 @@ class TextToSpeechUseCase @Inject constructor() {
         }
     }
 
-    fun speakText(context: Context, text: String, highlightedSentence: String = "", currentState: UiState?) {
+    fun speakText(
+        context: Context,
+        text: String,
+        highlightedSentence: String = "",
+        currentState: UiState?
+    ) {
         try {
             // Check if last mode was word reading
             if (lastModeWasReadingWords) {
@@ -274,7 +281,12 @@ class TextToSpeechUseCase @Inject constructor() {
         }
     }
 
-    private fun continueSpeakText(context: Context, text: String, highlightedSentence: String = "", currentState: UiState?) {
+    private fun continueSpeakText(
+        context: Context,
+        text: String,
+        highlightedSentence: String = "",
+        currentState: UiState?
+    ) {
         try {
             // Set text reading listener
             setTextReadingListener()
@@ -292,7 +304,8 @@ class TextToSpeechUseCase @Inject constructor() {
 
                 // Determine starting index
                 currentSentenceIndex = if (highlightedSentence.isNotEmpty()) {
-                    sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }.takeIf { it >= 0 } ?: 0
+                    sentences.indexOfFirst { it.trim() == highlightedSentence.trim() }
+                        .takeIf { it >= 0 } ?: 0
                 } else {
                     0
                 }
@@ -303,7 +316,8 @@ class TextToSpeechUseCase @Inject constructor() {
                         if (current is UiState.Success) {
                             current.copy(
                                 isSpeaking = true,
-                                lastHighlightedSentence = ""  // Reset last highlighted sentence
+                                lastHighlightedSentence = "",  // Reset last highlighted sentence
+                                lastHighlightedSentenceIndex = -1 // Reset last highlighted sentence index
                             )
                         } else current
                     }
@@ -322,7 +336,10 @@ class TextToSpeechUseCase @Inject constructor() {
             if (currentSentenceIndex < sentences.size) {
                 val sentence = sentences[currentSentenceIndex]
 
-                Log.d(TAG, "Speaking sentence ${currentSentenceIndex + 1}/${sentences.size}: \"$sentence\"")
+                Log.d(
+                    TAG,
+                    "Speaking sentence ${currentSentenceIndex + 1}/${sentences.size}: \"$sentence\""
+                )
 
                 // Update UI with current sentence
                 scope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
@@ -342,7 +359,12 @@ class TextToSpeechUseCase @Inject constructor() {
                     return
                 }
 
-                tts?.speak(cleanTextForSpeech(sentence), TextToSpeech.QUEUE_FLUSH, null, "sentence_$currentSentenceIndex")
+                tts?.speak(
+                    cleanTextForSpeech(sentence),
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "sentence_$currentSentenceIndex"
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error speaking sentence", e)
@@ -399,6 +421,7 @@ class TextToSpeechUseCase @Inject constructor() {
                 // Save current sentence
                 if (currentSentenceIndex < sentences.size) {
                     lastHighlightedSentence = sentences[currentSentenceIndex]
+                    lastHighlightedSentenceIndex = currentSentenceIndex
 
                     // Update UI, keeping highlight on stop
                     scope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
@@ -407,6 +430,7 @@ class TextToSpeechUseCase @Inject constructor() {
                                 state.copy(
                                     // Keep current read sentence highlighted when stopped
                                     lastHighlightedSentence = lastHighlightedSentence,
+                                    lastHighlightedSentenceIndex = lastHighlightedSentenceIndex, // Added this
                                     isSpeaking = false
                                 )
                             } else state
@@ -428,7 +452,13 @@ class TextToSpeechUseCase @Inject constructor() {
         }
     }
 
-    fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "", currentState: UiState?) {
+    fun speakTextWithHighlight(
+        context: Context,
+        text: String,
+        highlightedSentence: String = "",
+        sentenceIndex: Int = -1,
+        currentState: UiState?
+    ) {
         scope.launch(Dispatchers.Main + SupervisorJob() + errorHandler) {
             try {
                 // Check if last mode was word reading
@@ -477,24 +507,69 @@ class TextToSpeechUseCase @Inject constructor() {
                 if (sentences.isNotEmpty()) {
                     isSpeaking = true
 
-                    // Determine starting index:
-                    // 1. If user selected a sentence, start there
-                    // 2. If no selected sentence but there's a last highlighted one - start there
-                    // 3. Otherwise start from beginning
+                    // Determine starting index with priority to the direct sentence index
                     currentSentenceIndex = when {
+                        sentenceIndex >= 0 && sentenceIndex < sentences.size -> {
+                            // First priority: direct index if valid
+                            Log.d(TAG, "Using direct index: $sentenceIndex")
+                            sentenceIndex
+                        }
+
                         highlightedSentence.isNotEmpty() -> {
+                            // Second priority: find by sentence content
                             val index = sentences.indexOfFirst { sent ->
-                                sent.replace(SENTENCE_SEPARATOR, "").trim() == highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                                sent.replace(SENTENCE_SEPARATOR, "").trim() ==
+                                        highlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
                             }
-                            if (index >= 0) index else 0
+                            if (index >= 0) {
+                                Log.d(TAG, "Found sentence by content at index: $index")
+                                index
+                            } else 0
                         }
+
+                        currentState is UiState.Success &&
+                                currentState.lastHighlightedSentenceIndex >= 0 &&
+                                currentState.lastHighlightedSentenceIndex < sentences.size -> {
+                            // Third priority: use last highlighted index from state
+                            Log.d(
+                                TAG,
+                                "Using last highlighted index from state: ${currentState.lastHighlightedSentenceIndex}"
+                            )
+                            currentState.lastHighlightedSentenceIndex
+                        }
+
+                        lastHighlightedSentenceIndex >= 0 && lastHighlightedSentenceIndex < sentences.size -> {
+                            // Fourth priority: use last highlighted index from use case
+                            Log.d(
+                                TAG,
+                                "Using last highlighted index from use case: $lastHighlightedSentenceIndex"
+                            )
+                            lastHighlightedSentenceIndex
+                        }
+
                         lastHighlightedSentence.isNotEmpty() -> {
+                            // Fifth priority: find last highlighted sentence by content
                             val index = sentences.indexOfFirst { sent ->
-                                sent.replace(SENTENCE_SEPARATOR, "").trim() == lastHighlightedSentence.replace(SENTENCE_SEPARATOR, "").trim()
+                                sent.replace(SENTENCE_SEPARATOR, "").trim() ==
+                                        lastHighlightedSentence.replace(SENTENCE_SEPARATOR, "")
+                                            .trim()
                             }
-                            if (index >= 0) index else 0
+                            if (index >= 0) {
+                                Log.d(TAG, "Found last highlighted by content at index: $index")
+                                index
+                            } else 0
                         }
+
                         else -> 0
+                    }
+
+                    // Log the chosen starting sentence
+                    Log.d(TAG, "Starting speech at sentence index: $currentSentenceIndex")
+                    if (currentSentenceIndex < sentences.size) {
+                        Log.d(
+                            TAG,
+                            "Starting sentence: ${sentences[currentSentenceIndex].take(30)}..."
+                        )
                     }
 
                     // Update UI with first sentence and playback status
@@ -503,6 +578,7 @@ class TextToSpeechUseCase @Inject constructor() {
                             current.copy(
                                 currentSpokenWord = sentences[currentSentenceIndex],
                                 lastHighlightedSentence = "", // Reset saved sentence when starting reading
+                                lastHighlightedSentenceIndex = -1, // Reset saved index when starting reading
                                 isSpeaking = true
                             )
                         } else current
@@ -616,7 +692,8 @@ class TextToSpeechUseCase @Inject constructor() {
                             val latch = CountDownLatch(1)
 
                             withContext(Dispatchers.Main) {
-                                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                                tts?.setOnUtteranceProgressListener(object :
+                                    UtteranceProgressListener() {
                                     override fun onStart(utteranceId: String) {}
 
                                     override fun onDone(utteranceId: String) {
@@ -632,7 +709,12 @@ class TextToSpeechUseCase @Inject constructor() {
                                     }
                                 })
 
-                                tts?.speak(word, TextToSpeech.QUEUE_FLUSH, null, "word_${System.currentTimeMillis()}")
+                                tts?.speak(
+                                    word,
+                                    TextToSpeech.QUEUE_FLUSH,
+                                    null,
+                                    "word_${System.currentTimeMillis()}"
+                                )
                             }
 
                             // Wait for speech to finish and pause for 1 second
@@ -675,14 +757,17 @@ class TextToSpeechUseCase @Inject constructor() {
     }
 
     private fun cleanTextForSpeech(text: String): String {
-        // Удаляем звездочки, разделители предложений и другие специальные символы
-        // Оставляем только текст и базовую пунктуацию
+        // Remove asterisks, sentence separators, and other special characters
+        // Keep only text and basic punctuation
         return text
-            .replace(SENTENCE_SEPARATOR, "") // Удаляем разделители предложений
+            .replace(SENTENCE_SEPARATOR, "") // Remove sentence separators
             .replace(Regex("""\*([^*]+)\*""")) { matchResult ->
-                matchResult.groupValues[1] // Возвращаем только текст внутри звездочек
+                matchResult.groupValues[1] // Return only text inside asterisks
             }
-            .replace(Regex("[^\\p{L}\\p{N}\\s.,!?;:-]"), "") // Оставляем буквы, цифры, пробелы и основные знаки пунктуации
+            .replace(
+                Regex("[^\\p{L}\\p{N}\\s.,!?;:-]"),
+                ""
+            ) // Keep letters, numbers, spaces and main punctuation marks
     }
 
     private fun splitIntoSentences(text: String): List<String> {

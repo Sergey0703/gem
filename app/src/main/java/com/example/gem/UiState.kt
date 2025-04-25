@@ -1,3 +1,5 @@
+// app/src/main/java/com/example/gem/UiState.kt
+
 package com.example.gem
 
 /**
@@ -26,18 +28,19 @@ sealed class UiState {
      * Text has been generated
      */
     data class Success(
-        val englishVersion: String, // Хранит версию с разделителями для разбиения
-        val englishDisplayVersion: String, // Версия без разделителей для отображения
-        val russianVersion: String, // Хранит версию с разделителями для разбиения
-        val russianDisplayVersion: String = "", // Версия без разделителей для отображения
+        val englishVersion: String, // Stores version with separators for splitting
+        val englishDisplayVersion: String, // Version without separators for display
+        val russianVersion: String, // Stores version with separators for splitting
+        val russianDisplayVersion: String = "", // Version without separators for display
         val selectedWords: List<String>,
         val isRussian: Boolean = false,
         val currentSpokenWord: String = "",
-        val lastHighlightedSentence: String = "", // Последнее подсвеченное предложение
+        val lastHighlightedSentence: String = "", // Last highlighted sentence
+        val lastHighlightedSentenceIndex: Int = -1, // Added index of last highlighted sentence
         val generationTime: Double = 0.0,
         val isTranslating: Boolean = false,
-        val isSpeaking: Boolean = false, // Флаг активного воспроизведения текста
-        val lastSpokenWordIndex: Int = 0 // Индекс последнего произнесенного слова
+        val isSpeaking: Boolean = false, // Flag for active text playback
+        val lastSpokenWordIndex: Int = 0 // Index of last spoken word
     ) : UiState()
 
     /**

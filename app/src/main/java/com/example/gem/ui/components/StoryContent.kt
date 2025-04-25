@@ -1,3 +1,5 @@
+// app/src/main/java/com/example/gem/ui/components/StoryContent.kt
+
 package com.example.gem.ui.components
 
 import android.util.Log
@@ -50,10 +52,14 @@ fun StoryContent(
     highlightedSentence: String,
     lastHighlightedSentence: String,
     scrollState: androidx.compose.foundation.ScrollState,
-    onSentenceClick: (String) -> Unit,
+    onSentenceClick: (String, Int) -> Unit, // Updated to include sentence index
     onWordLongPress: (String, TextLayoutResult, ((Offset) -> Unit) -> Unit) -> Unit,
     selectedWords: List<String>,
-    onWordClick: (String) -> Unit
+    onWordClick: (String) -> Unit,
+    // Added these parameters for direct index-based highlighting
+    highlightedSentenceIndex: Int = -1,
+    currentSentenceIndex: Int = -1,
+    lastHighlightedSentenceIndex: Int = -1
 ) {
     Box(
         modifier = Modifier.fillMaxSize()
@@ -63,20 +69,20 @@ fun StoryContent(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            // Контейнер с текстом и скроллбаром
+            // Container with text and scrollbar
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
-                // Контент с прокруткой
+                // Scrollable content
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(end = 12.dp)
                 ) {
-                    // Для разбиения на предложения и подсветки используем версию с разделителями
+                    // For sentence splitting and highlighting use version with separators
                     if (sentences.size > 1) {
-                        // Разбиение на предложения успешно сработало, отображаем их с подсветкой
+                        // Sentence splitting successful, display with highlighting
                         Column(
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -88,29 +94,43 @@ fun StoryContent(
                                 crossAxisSpacing = 8.dp,
                                 mainAxisSpacing = 8.dp
                             ) {
-                                sentences.forEach { sentence ->
-                                    // Определяем, нужно ли подсвечивать текущее предложение
+                                sentences.forEachIndexed { index, sentence ->
+                                    // Determine if current sentence should be highlighted - UPDATED LOGIC
                                     val shouldHighlight = when {
-                                        // Когда идет чтение, подсвечиваем только текущее произносимое предложение
-                                        isSpeaking && currentSpokenWord.isNotEmpty() &&
-                                                currentSpokenWord.replace("<<SENTENCE_END>>", "").trim() == sentence.replace("<<SENTENCE_END>>", "").trim() -> true
+                                        // When reading, highlight only current spoken sentence by index
+                                        isSpeaking && index == currentSentenceIndex -> true
 
-                                        // Когда чтение остановлено:
-                                        // Подсвечиваем либо последнее прочитанное предложение, либо выбранное пользователем
+                                        // When speaking by index match
+                                        isSpeaking && currentSpokenWord.isNotEmpty() &&
+                                                currentSpokenWord.replace("<<SENTENCE_END>>", "").trim() ==
+                                                sentence.replace("<<SENTENCE_END>>", "").trim() -> true
+
+                                        // When reading stopped, highlight by direct index
+                                        !isSpeaking && index == highlightedSentenceIndex -> true
+
+                                        // Fallback to content-based comparison if we need to
                                         !isSpeaking && (
-                                                (lastHighlightedSentence.isNotEmpty() &&
-                                                        lastHighlightedSentence.replace("<<SENTENCE_END>>", "").trim() == sentence.replace("<<SENTENCE_END>>", "").trim()) ||
+                                                (lastHighlightedSentenceIndex == index && index >= 0) ||
                                                         (highlightedSentence.isNotEmpty() &&
-                                                                highlightedSentence.replace("<<SENTENCE_END>>", "").trim() == sentence.replace("<<SENTENCE_END>>", "").trim())
+                                                                highlightedSentence.replace("<<SENTENCE_END>>", "").trim() ==
+                                                                sentence.replace("<<SENTENCE_END>>", "").trim()) ||
+                                                        (lastHighlightedSentence.isNotEmpty() &&
+                                                                lastHighlightedSentence.replace("<<SENTENCE_END>>", "").trim() ==
+                                                                sentence.replace("<<SENTENCE_END>>", "").trim())
                                                 ) -> true
 
                                         else -> false
                                     }
 
-                                    // Отображаем предложение без разделителей
+                                    // Log highlight state for debugging
+                                    if (shouldHighlight) {
+                                        Log.d("StoryContent", "Highlighting sentence $index: ${sentence.take(30)}...")
+                                    }
+
+                                    // Display sentence without separators
                                     val cleanSentence = sentence.replace("<<SENTENCE_END>>", "")
 
-                                    // Для отслеживания расположения текста и выделения конкретных слов
+                                    // For tracking text layout and specific word highlighting
                                     var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
                                     Text(
@@ -123,16 +143,17 @@ fun StoryContent(
                                             .pointerInput(Unit) {
                                                 detectTapGestures(
                                                     onTap = {
-                                                        // Обработка нажатия только если чтение не активно
+                                                        // Handle tap only if not currently reading
                                                         if (!isSpeaking) {
-                                                            onSentenceClick(sentence)
+                                                            Log.d("StoryContent", "Tapped on sentence $index: ${cleanSentence.take(30)}...")
+                                                            onSentenceClick(sentence, index)
                                                         }
                                                     },
                                                     onLongPress = { offset ->
                                                         try {
                                                             val layoutResult = textLayoutResult
                                                             if (layoutResult != null) {
-                                                                // Исправляем функцию для обработки без suspend
+                                                                // Fix function for handling without suspend
                                                                 onWordLongPress(cleanSentence, layoutResult) { handler ->
                                                                     handler(offset)
                                                                 }
@@ -155,7 +176,7 @@ fun StoryContent(
                             }
                         }
                     } else {
-                        // Если разбиение не удалось, отображаем полный текст
+                        // If splitting failed, display full text
                         var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
                         Text(
@@ -168,16 +189,16 @@ fun StoryContent(
                                 .pointerInput(Unit) {
                                     detectTapGestures(
                                         onTap = {
-                                            // При отсутствии предложений, выделяем целый текст
+                                            // When no sentences, highlight whole text
                                             if (!isSpeaking) {
-                                                onSentenceClick(if (highlightedSentence.isNotEmpty()) "" else textForDisplay)
+                                                onSentenceClick(if (highlightedSentence.isNotEmpty()) "" else textForDisplay, 0)
                                             }
                                         },
                                         onLongPress = { offset ->
                                             try {
                                                 val layoutResult = textLayoutResult
                                                 if (layoutResult != null) {
-                                                    // Исправляем функцию для обработки без suspend
+                                                    // Fix function for handling without suspend
                                                     onWordLongPress(textForDisplay, layoutResult) { handler ->
                                                         handler(offset)
                                                     }
@@ -199,7 +220,7 @@ fun StoryContent(
                     }
                 }
 
-                // Улучшенный вертикальный скроллбар
+                // Improved vertical scrollbar
                 VerticalScrollbar(
                     scrollState = scrollState,
                     modifier = Modifier
@@ -207,10 +228,12 @@ fun StoryContent(
                         .fillMaxHeight(),
                     sentences = sentences,
                     currentSentenceIndex = if (sentences.isNotEmpty()) {
-                        sentences.indexOfFirst { sentence ->
-                            val cleanSentence = sentence.replace("<<SENTENCE_END>>", "").trim()
-                            val stateSentence = currentSpokenWord.replace("<<SENTENCE_END>>", "").trim()
-                            cleanSentence == stateSentence
+                        if (currentSentenceIndex >= 0) currentSentenceIndex else {
+                            sentences.indexOfFirst { sentence ->
+                                val cleanSentence = sentence.replace("<<SENTENCE_END>>", "").trim()
+                                val stateSentence = currentSpokenWord.replace("<<SENTENCE_END>>", "").trim()
+                                cleanSentence == stateSentence
+                            }
                         }
                     } else -1
                 )
@@ -222,7 +245,7 @@ fun StoryContent(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            // Контейнер с сеткой слов
+            // Container with word grid
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 100.dp),
                 modifier = Modifier

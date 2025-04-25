@@ -92,8 +92,8 @@ class StoryViewModel @Inject constructor(
         textToSpeechUseCase.speakText(context, text, highlightedSentence, getCurrentState())
     }
 
-    fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "") {
-        textToSpeechUseCase.speakTextWithHighlight(context, text, highlightedSentence, getCurrentState())
+    fun speakTextWithHighlight(context: Context, text: String, highlightedSentence: String = "", sentenceIndex: Int = -1) {
+        textToSpeechUseCase.speakTextWithHighlight(context, text, highlightedSentence, sentenceIndex, getCurrentState())
     }
 
     fun speakSelectedWords(context: Context, words: List<String>) {
