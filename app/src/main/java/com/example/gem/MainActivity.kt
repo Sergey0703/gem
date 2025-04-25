@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(paddingValues)
                     ) {
                         composable("story") {
-                            StoryScreen()
+                            BakingScreen()
                         }
                         composable("dictionary") {
                             DictionaryScreen(
