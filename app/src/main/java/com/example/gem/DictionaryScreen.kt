@@ -48,9 +48,17 @@ fun DictionaryScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(SortOption.DATE_ADDED) }
     var sortAscending by remember { mutableStateOf(false) }
+    var isSorting by remember { mutableStateOf(false) } // State for tracking sorting operation
 
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+
+    // Effect to reset sorting indicator when UI state changes
+    LaunchedEffect(uiState) {
+        if (uiState is DictionaryUiState.Success) {
+            isSorting = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -64,10 +72,21 @@ fun DictionaryScreen(
                     }
                 },
                 actions = {
-                    // Sort button
-                    Box {
-                        IconButton(onClick = { showSortMenu = true }) {
-                            Icon(Icons.Outlined.Sort, contentDescription = "Sort")
+                    // Sort button with loading indicator
+                    Box(
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Show sorting indicator when active
+                        if (isSorting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            // Sort button
+                            IconButton(onClick = { showSortMenu = true }) {
+                                Icon(Icons.Outlined.Sort, contentDescription = "Sort")
+                            }
                         }
 
                         DropdownMenu(
@@ -77,6 +96,7 @@ fun DictionaryScreen(
                             DropdownMenuItem(
                                 text = { Text("Name ${if(currentSort == SortOption.NAME) if(sortAscending) "↑" else "↓" else ""}") },
                                 onClick = {
+                                    isSorting = true // Show loading indicator
                                     if (currentSort == SortOption.NAME) {
                                         sortAscending = !sortAscending
                                     } else {
@@ -91,6 +111,7 @@ fun DictionaryScreen(
                             DropdownMenuItem(
                                 text = { Text("Last used ${if(currentSort == SortOption.LAST_USED) if(sortAscending) "↑" else "↓" else ""}") },
                                 onClick = {
+                                    isSorting = true // Show loading indicator
                                     if (currentSort == SortOption.LAST_USED) {
                                         sortAscending = !sortAscending
                                     } else {
@@ -105,6 +126,7 @@ fun DictionaryScreen(
                             DropdownMenuItem(
                                 text = { Text("Date added ${if(currentSort == SortOption.DATE_ADDED) if(sortAscending) "↑" else "↓" else ""}") },
                                 onClick = {
+                                    isSorting = true // Show loading indicator
                                     if (currentSort == SortOption.DATE_ADDED) {
                                         sortAscending = !sortAscending
                                     } else {
@@ -171,6 +193,18 @@ fun DictionaryScreen(
                         }
                     }
                     is DictionaryUiState.Success -> {
+                        // Show loading overlay during sorting if needed
+                        if (isSorting) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
+                        }
+
                         LazyColumn {
                             items(state.words) { word ->
                                 WordCard(
@@ -276,24 +310,7 @@ fun WordDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(title)
-
-                // Delete button in dialog
-                if (showDelete) {
-                    IconButton(onClick = { showDeleteConfirmation = true }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Delete",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
+            Text(title)
         },
         text = {
             Column {
@@ -326,26 +343,50 @@ fun WordDialog(
                 )
             }
         },
+        // Three buttons in bottom row: Delete (left), Cancel (middle), Save (right)
         confirmButton = {
-            TextButton(
-                onClick = {
-                    val updatedWord = initialWord.copy(
-                        english = english,
-                        russian = russian,
-                        transcription = transcription,
-                        example = example
-                    )
-                    onSave(updatedWord)
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Save")
+                // Delete button on the left (only if editing)
+                if (showDelete) {
+                    TextButton(
+                        onClick = { showDeleteConfirmation = true },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Delete")
+                    }
+                } else {
+                    // Spacer to maintain layout when delete button is not shown
+                    Spacer(Modifier.width(64.dp))
+                }
+
+                // Cancel button in the middle
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+
+                // Save button on the right
+                TextButton(
+                    onClick = {
+                        val updatedWord = initialWord.copy(
+                            english = english,
+                            russian = russian,
+                            transcription = transcription,
+                            example = example
+                        )
+                        onSave(updatedWord)
+                    }
+                ) {
+                    Text("Save")
+                }
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
+        // Need to provide an empty dismissButton to avoid duplicating the Cancel button
+        dismissButton = {}
     )
 }
 

@@ -14,6 +14,7 @@ import com.opencsv.CSVParserBuilder
 import com.opencsv.CSVReader
 import com.opencsv.CSVReaderBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.InputStream
@@ -102,7 +103,7 @@ class DictionaryViewModel @Inject constructor(
                 wordDao.getAllWords().collect { words ->
                     cachedWords = words
                     val filteredWords = filterWordsByQuery(words)
-                    val sortedWords = sortWords(filteredWords)
+                    val sortedWords = sortWordsInternal(filteredWords)
                     _uiState.value = DictionaryUiState.Success(sortedWords)
                 }
             } catch (e: Exception) {
@@ -116,7 +117,7 @@ class DictionaryViewModel @Inject constructor(
         searchQuery = query
         viewModelScope.launch {
             val filteredWords = filterWordsByQuery(cachedWords)
-            val sortedWords = sortWords(filteredWords)
+            val sortedWords = sortWordsInternal(filteredWords)
             _uiState.value = DictionaryUiState.Success(sortedWords)
         }
     }
@@ -137,15 +138,20 @@ class DictionaryViewModel @Inject constructor(
         isAscending = ascending
 
         viewModelScope.launch {
+            // Set loading state
+            _uiState.value = DictionaryUiState.Loading
+
+            // Add artificial delay to show loading indicator (only in development)
+            delay(800) // This delay is just for UI feedback and can be removed in production
+
             val state = _uiState.value
-            if (state is DictionaryUiState.Success) {
-                val sortedWords = sortWords(state.words)
-                _uiState.value = DictionaryUiState.Success(sortedWords)
-            }
+            val filteredWords = filterWordsByQuery(cachedWords)
+            val sortedWords = sortWordsInternal(filteredWords)
+            _uiState.value = DictionaryUiState.Success(sortedWords)
         }
     }
 
-    private fun sortWords(words: List<Word>): List<Word> {
+    private fun sortWordsInternal(words: List<Word>): List<Word> {
         return when (currentSortOption) {
             SortOption.NAME -> {
                 if (isAscending) {
