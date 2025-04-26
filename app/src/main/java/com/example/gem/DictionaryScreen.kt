@@ -1,3 +1,5 @@
+// app/src/main/java/com/example/gem/DictionaryScreen.kt
+
 package com.example.gem
 
 import android.net.Uri
@@ -29,7 +31,7 @@ fun DictionaryScreen(
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    
+
     val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
@@ -37,10 +39,10 @@ fun DictionaryScreen(
             TopAppBar(
                 title = {
                     when (val state = uiState) {
-                        is DictionaryUiState.Success -> Text("Словарь (${state.words.size} слов)")
+                        is DictionaryUiState.Success -> Text("Dictionary (${state.words.size} words)")
                         DictionaryUiState.Initial,
                         DictionaryUiState.Loading,
-                        is DictionaryUiState.Error -> Text("Словарь")
+                        is DictionaryUiState.Error -> Text("Dictionary")
                     }
                 },
                 actions = {
@@ -59,17 +61,17 @@ fun DictionaryScreen(
         Column(
             modifier = Modifier.padding(paddingValues)
         ) {
-            // Поле поиска
+            // Search field
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { 
+                onValueChange = {
                     searchQuery = it
                     viewModel.filterWords(it)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                placeholder = { Text("Поиск слов...") },
+                placeholder = { Text("Search words...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true
             )
@@ -89,7 +91,7 @@ fun DictionaryScreen(
                             ) {
                                 CircularProgressIndicator()
                                 Text(
-                                    "Импорт словаря...",
+                                    "Importing dictionary...",
                                     color = Color.White
                                 )
                             }
@@ -113,7 +115,7 @@ fun DictionaryScreen(
                         )
                     }
                     DictionaryUiState.Initial -> {
-                        // Initial state - можно показать приветственное сообщение
+                        // Initial state - can show welcome message
                     }
                 }
             }
@@ -237,4 +239,4 @@ fun WordCard(
             }
         }
     }
-} 
+}

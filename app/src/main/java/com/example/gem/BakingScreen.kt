@@ -47,7 +47,7 @@ fun BakingScreen(
     var showSelectedWords by remember { mutableStateOf(false) }
     var wordInfo by remember { mutableStateOf(Triple("", "", "")) }
     var highlightedSentence by remember { mutableStateOf("") }
-    var highlightedSentenceIndex by remember { mutableStateOf(-1) } // Added to track sentence index
+    var highlightedSentenceIndex by remember { mutableStateOf(-1) }
     var speechRate by remember { mutableStateOf(1.0f) }
     var isGenerating by remember { mutableStateOf(false) }
 
@@ -129,11 +129,11 @@ fun BakingScreen(
                     val displayCurrentIndex = if (currentSentenceIndex >= 0) currentSentenceIndex + 1 else 0
                     val totalSentences = sentences.size
 
-                    // Build title for control panel
+                    // Build title for control panel - ALWAYS IN ENGLISH
                     val title = if (showSelectedWords) {
-                        if (!state.isRussian) "Selected words:" else "Выбранные слова:"
+                        "Selected words"
                     } else {
-                        if (!state.isRussian) "Story:" else "История:"
+                        "Story"
                     }
 
                     // Additional subtitle info
@@ -175,7 +175,7 @@ fun BakingScreen(
                                                 context,
                                                 if (state.isRussian) state.russianVersion else state.englishVersion,
                                                 highlightedSentence,
-                                                highlightedSentenceIndex // Pass the sentence index
+                                                highlightedSentenceIndex
                                             )
                                         }
                                     }
@@ -192,8 +192,8 @@ fun BakingScreen(
                                 highlightedSentence = highlightedSentence,
                                 lastHighlightedSentence = state.lastHighlightedSentence,
                                 scrollState = scrollState,
-                                onSentenceClick = { sentence, index -> // Updated to receive index
-                                    // For debuggin
+                                onSentenceClick = { sentence, index ->
+                                    // For debugging
                                     Log.d("BakingScreen", "Clicked sentence $index: ${sentence.take(30)}...")
 
                                     // Always save index when selecting a sentence
