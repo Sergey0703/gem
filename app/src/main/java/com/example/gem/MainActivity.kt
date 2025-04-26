@@ -21,7 +21,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.gem.ui.theme.GemTheme
 import dagger.hilt.android.AndroidEntryPoint
-import dagger.hilt.android.lifecycle.HiltViewModel
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
@@ -37,21 +36,26 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val viewModel: DictionaryViewModel = hiltViewModel()
                 val context = LocalContext.current
-                
+
+                // Флаг для отслеживания операции импорта
+                var importInProgress by remember { mutableStateOf(false) }
+
                 val filePickerLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.GetContent()
                 ) { uri: Uri? ->
                     if (uri != null) {
                         try {
+                            importInProgress = true // Устанавливаем флаг, что начали импорт
                             context.contentResolver.openInputStream(uri)?.use { inputStream ->
                                 viewModel.importCsv(inputStream)
-                                Toast.makeText(context, "Начинаю импорт файла...", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Starting import...", Toast.LENGTH_SHORT).show()
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Ошибка при чтении файла: ${e.message}", Toast.LENGTH_LONG).show()
+                            importInProgress = false // Сбрасываем флаг при ошибке
+                            Toast.makeText(context, "Error reading file: ${e.message}", Toast.LENGTH_LONG).show()
                         }
                     } else {
-                        Toast.makeText(context, "Файл не выбран", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No file selected", Toast.LENGTH_SHORT).show()
                     }
                 }
 
@@ -60,6 +64,8 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(uiState) {
                     when (uiState) {
                         is DictionaryUiState.Error -> {
+                            // При ошибке показываем сообщение и сбрасываем флаг импорта
+                            importInProgress = false
                             Toast.makeText(
                                 context,
                                 (uiState as DictionaryUiState.Error).message,
@@ -67,11 +73,12 @@ class MainActivity : ComponentActivity() {
                             ).show()
                         }
                         is DictionaryUiState.Success -> {
-                            // Показываем Toast только если это результат импорта
-                            if ((uiState as DictionaryUiState.Success).words.isNotEmpty()) {
+                            // Показываем Toast только если импорт был запущен и сейчас завершился
+                            if (importInProgress) {
+                                importInProgress = false // Сбрасываем флаг
                                 Toast.makeText(
                                     context,
-                                    "Импорт успешно завершен",
+                                    "Import completed successfully",
                                     Toast.LENGTH_SHORT
                                 ).show()
                             }
@@ -79,6 +86,7 @@ class MainActivity : ComponentActivity() {
                         else -> {}
                     }
                 }
+
                 Scaffold(
                     bottomBar = {
                         NavigationBar(
