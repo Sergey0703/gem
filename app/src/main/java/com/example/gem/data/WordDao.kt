@@ -1,3 +1,5 @@
+// app/src/main/java/com/example/gem/data/WordDao.kt
+
 package com.example.gem.data
 
 import androidx.room.*

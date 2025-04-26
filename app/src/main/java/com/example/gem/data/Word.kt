@@ -1,3 +1,5 @@
+// app/src/main/java/com/example/gem/data/Word.kt
+
 package com.example.gem.data
 
 import androidx.room.Entity
@@ -15,4 +17,4 @@ data class Word(
     val dateAdded: Date = Date(),
     val lastUsed: Date? = null,
     val rating: Int = 0
-) 
+)
