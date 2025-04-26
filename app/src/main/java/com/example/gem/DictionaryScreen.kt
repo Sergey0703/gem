@@ -400,30 +400,53 @@ fun WordCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp), // Уменьшенный вертикальный отступ для меньшей высоты
         elevation = CardDefaults.cardElevation()
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp) // Уменьшенный вертикальный отступ внутри карточки
         ) {
-            // Play button - top right corner
-            IconButton(
-                onClick = onPlayClick,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(40.dp)
-            ) {
-                Icon(
-                    Icons.Default.VolumeUp,
-                    contentDescription = "Pronounce",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            // Content
+            // Колонка с правыми кнопками - выровнена по правому краю
             Column(
                 modifier = Modifier
-                    .padding(12.dp)
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Увеличенная кнопка воспроизведения
+                IconButton(
+                    onClick = onPlayClick,
+                    modifier = Modifier.size(48.dp) // Увеличили размер
+                ) {
+                    Icon(
+                        Icons.Default.VolumeUp,
+                        contentDescription = "Pronounce",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp) // Увеличили размер иконки
+                    )
+                }
+
+                // Кнопка редактирования прямо под кнопкой воспроизведения
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier.size(48.dp) // Увеличили размер
+                ) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(24.dp) // Размер иконки редактирования
+                    )
+                }
+            }
+
+            // Основной контент (словарная информация)
+            Column(
+                modifier = Modifier
+                    .padding(start = 12.dp, end = 100.dp, top = 4.dp, bottom = 4.dp) // Увеличенное пространство справа для кнопок
                     .fillMaxWidth()
             ) {
                 // Word title
@@ -431,8 +454,7 @@ fun WordCard(
                     text = word.english,
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 40.dp) // Space for play button
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 // Transcription
@@ -441,7 +463,7 @@ fun WordCard(
                         text = word.transcription,
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.Gray,
-                        modifier = Modifier.padding(top = 2.dp)
+                        modifier = Modifier.padding(top = 1.dp) // Уменьшенный отступ
                     )
                 }
 
@@ -449,7 +471,7 @@ fun WordCard(
                 Text(
                     text = word.russian,
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 2.dp) // Уменьшенный отступ
                 )
 
                 // Example
@@ -458,53 +480,24 @@ fun WordCard(
                         text = word.example,
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.Gray,
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = 2.dp), // Уменьшенный отступ
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // Dates section with edit button aligned to bottom right
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                ) {
-                    // Date information - left aligned
-                    Column(
-                        modifier = Modifier.align(Alignment.BottomStart)
-                    ) {
-                        // Date added
-                        Text(
-                            text = "Added: ${formatDate(word.dateAdded)}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-
-                        // Last used date (if any)
+                // Дата в одну строку
+                Text(
+                    text = buildString {
+                        append("Added: ${formatDate(word.dateAdded)}")
                         word.lastUsed?.let {
-                            Text(
-                                text = "Last used: ${formatDate(it)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
+                            append(" • Used: ${formatDate(it)}")
                         }
-                    }
-
-                    // Edit button - bottom right
-                    IconButton(
-                        onClick = onEditClick,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Edit",
-                            tint = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-                }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(top = 3.dp) // Уменьшенный отступ
+                )
             }
         }
     }
