@@ -120,7 +120,7 @@ fun StoryHeader(
                 }
 
                 // Отступ между кнопками
-                Spacer(modifier = Modifier.width(20.dp))
+                Spacer(modifier = Modifier.width(16.dp))
 
                 // Кнопка переключения языка (теперь справа)
                 IconButton(

@@ -3,6 +3,9 @@
 package com.example.gem.domain
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
 import android.util.Log
 import com.example.gem.BuildConfig
 import com.example.gem.UiState
@@ -11,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.Date
 import javax.inject.Inject
@@ -128,71 +132,112 @@ class GenerateStoryUseCase @Inject constructor(
                 }
 
                 Log.d(TAG, "Generating story - Attempt $attempt of $maxAttempts")
-                val response = withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
-                    generativeModel.generateContent(storyPrompt)
-                }
-                englishStory = response.text?.trim() ?: throw Exception("Empty response from API")
+                Log.d(TAG, "Current API key length: ${BuildConfig.API_KEY.length}, first 5 chars: ${BuildConfig.API_KEY.take(5)}...")
 
-                Log.d(TAG, "Raw API response first 500 chars: ${englishStory.take(500)}")
-                Log.d(TAG, "Contains separators: ${englishStory.contains(SENTENCE_SEPARATOR)}")
-                Log.d(TAG, "Count of separators: ${englishStory.split(SENTENCE_SEPARATOR).size - 1}")
+                try {
+                    // Логируем параметры запроса
+                    Log.d(TAG, "Request prompt size: ${storyPrompt.length} characters")
+                    Log.d(TAG, "Words count to use: ${availableWords.size}")
+                    Log.d(TAG, "Network connection available: ${isNetworkAvailable(context)}")
 
-                // Check for used words
-                val usedWords = availableWords.filter { word ->
-                    englishStory.contains("*$word*", ignoreCase = true)
-                }
+                    val response = withContext(Dispatchers.IO + SupervisorJob() + errorHandler) {
+                        try {
+                            // Засекаем время выполнения запроса
+                            val startTime = System.currentTimeMillis()
+                            val apiResponse = generativeModel.generateContent(storyPrompt)
+                            val endTime = System.currentTimeMillis()
+                            Log.d(TAG, "API request completed in ${endTime - startTime}ms")
 
-                // Words not yet used, prepare for next attempt
-                lastMissingWords = availableWords.filter { word ->
-                    !englishStory.contains("*$word*", ignoreCase = true)
-                }
+                            apiResponse
+                        } catch (e: Exception) {
+                            // Детальное логирование ошибки API
+                            Log.e(TAG, "API call exception: ${e.javaClass.name}", e)
+                            Log.e(TAG, "Error message: ${e.message}")
+                            Log.e(TAG, "Cause: ${e.cause?.message}")
 
-                // Update state with progress
-                updateState { _ ->
-                    UiState.Loading(
-                        attempt = attempt,
-                        maxAttempts = maxAttempts,
-                        usedWordsCount = usedWords.size,
-                        totalWords = availableWords.size,
-                        storyLength = englishStory.length,
-                        missingWords = lastMissingWords
-                    )
-                }
+                            // Проверка на специфические ошибки Google API
+                            when {
+                                e.message?.contains("403") == true ->
+                                    Log.e(TAG, "Permission denied (403) - API key may be invalid or restricted")
+                                e.message?.contains("429") == true ->
+                                    Log.e(TAG, "Too many requests (429) - Rate limit or quota exceeded")
+                                e.message?.contains("401") == true ->
+                                    Log.e(TAG, "Unauthorized (401) - Authentication failed")
+                                e.message?.contains("timeout") == true || e.message?.contains("timed out") == true ->
+                                    Log.e(TAG, "Request timed out - Check network or reduce prompt size")
+                                e.message?.contains("UNAVAILABLE") == true ->
+                                    Log.e(TAG, "Service unavailable - Gemini API may be down or unreachable")
+                                e.message?.contains("INVALID_ARGUMENT") == true ->
+                                    Log.e(TAG, "Invalid argument - Check prompt format and content")
+                                e.message?.contains("RESOURCE_EXHAUSTED") == true ->
+                                    Log.e(TAG, "Resource exhausted - Quota exceeded")
+                                else ->
+                                    Log.e(TAG, "Unspecified API error")
+                            }
 
-                Log.d(TAG, "Story generated - Attempt $attempt")
-                Log.d(TAG, "English story length: ${englishStory.length}")
-                Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
+                            throw e
+                        }
+                    }
 
-                if (lastMissingWords.isEmpty()) {
-                    // All words used, update state and finish
+                    // Проверка ответа
+                    if (response.text == null) {
+                        Log.e(TAG, "Received null text in response (response object: ${response.javaClass.name})")
+                        throw Exception("Empty response from API (null text)")
+                    }
+
+                    englishStory = response.text?.trim() ?: ""
+
+                    // Проверка на пустой ответ
+                    if (englishStory.isEmpty()) {
+                        Log.e(TAG, "Received empty text in response")
+                        throw Exception("Empty response from API (empty text)")
+                    }
+
+                    // Детальное логирование успешного ответа
+                    Log.d(TAG, "Response received successfully, length: ${englishStory.length} chars")
+                    Log.d(TAG, "Response first 100 chars: ${englishStory.take(100)}")
+                    Log.d(TAG, "Response last 100 chars: ${englishStory.takeLast(100)}")
+                    Log.d(TAG, "Contains separators: ${englishStory.contains(SENTENCE_SEPARATOR)}")
+                    Log.d(TAG, "Count of separators: ${englishStory.split(SENTENCE_SEPARATOR).size - 1}")
+
+                    // Проверка на потенциальные проблемы в ответе
+                    if (!englishStory.contains(SENTENCE_SEPARATOR)) {
+                        Log.w(TAG, "WARNING: Response doesn't contain expected sentence separators!")
+                    }
+
+                    if (!englishStory.contains("*")) {
+                        Log.w(TAG, "WARNING: Response doesn't contain any asterisks for marking words!")
+                    }
+
+                    // Check for used words
+                    val usedWords = availableWords.filter { word ->
+                        englishStory.contains("*$word*", ignoreCase = true)
+                    }
+
+                    // Words not yet used, prepare for next attempt
+                    lastMissingWords = availableWords.filter { word ->
+                        !englishStory.contains("*$word*", ignoreCase = true)
+                    }
+
+                    // Update state with progress
                     updateState { _ ->
-                        UiState.Success(
-                            englishVersion = englishStory,
-                            englishDisplayVersion = cleanTextForUI(cleanTextForDisplay(englishStory)),
-                            russianVersion = "",
-                            russianDisplayVersion = "",
-                            selectedWords = availableWords,
-                            isRussian = false,
-                            currentSpokenWord = "",
-                            lastHighlightedSentence = "",
-                            generationTime = 0.0,
-                            isSpeaking = false,
-                            lastSpokenWordIndex = 0
+                        UiState.Loading(
+                            attempt = attempt,
+                            maxAttempts = maxAttempts,
+                            usedWordsCount = usedWords.size,
+                            totalWords = availableWords.size,
+                            storyLength = englishStory.length,
+                            missingWords = lastMissingWords
                         )
                     }
-                    Log.d(TAG, "Story generation completed successfully")
 
-                    // Update word usage dates
-                    wordStorageUseCase.updateWordUsageDates(availableWords)
+                    Log.d(TAG, "Story generated - Attempt $attempt")
+                    Log.d(TAG, "English story length: ${englishStory.length}")
+                    Log.d(TAG, "Used words count: ${usedWords.size}/${availableWords.size}")
+                    Log.d(TAG, "Missing words: ${lastMissingWords.joinToString(", ")}")
 
-                    return Triple(englishStory, cleanTextForUI(cleanTextForDisplay(englishStory)), availableWords)
-                } else {
-                    Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
-
-                    if (attempt == maxAttempts && lastMissingWords.size >= errorThreshold) {
-                        throw Exception("Failed to use enough words after $maxAttempts attempts. Missing ${lastMissingWords.size} words (threshold: $errorThreshold).")
-                    } else if (attempt == maxAttempts) {
-                        // If this is the last attempt but fewer words are missing than the threshold, use current version
+                    if (lastMissingWords.isEmpty()) {
+                        // All words used, update state and finish
                         updateState { _ ->
                             UiState.Success(
                                 englishVersion = englishStory,
@@ -208,21 +253,103 @@ class GenerateStoryUseCase @Inject constructor(
                                 lastSpokenWordIndex = 0
                             )
                         }
-                        Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
+                        Log.d(TAG, "Story generation completed successfully")
 
-                        // Update usage dates only for used words
-                        val usedWordsSet = usedWords.toSet()
-                        wordStorageUseCase.updateWordUsageDates(usedWordsSet.toList())
+                        // Update word usage dates
+                        wordStorageUseCase.updateWordUsageDates(availableWords)
 
                         return Triple(englishStory, cleanTextForUI(cleanTextForDisplay(englishStory)), availableWords)
+                    } else {
+                        Log.w(TAG, "Missing ${lastMissingWords.size} words in attempt $attempt: ${lastMissingWords.joinToString(", ")}")
+
+                        if (attempt == maxAttempts && lastMissingWords.size >= errorThreshold) {
+                            throw Exception("Failed to use enough words after $maxAttempts attempts. Missing ${lastMissingWords.size} words (threshold: $errorThreshold).")
+                        } else if (attempt == maxAttempts) {
+                            // If this is the last attempt but fewer words are missing than the threshold, use current version
+                            updateState { _ ->
+                                UiState.Success(
+                                    englishVersion = englishStory,
+                                    englishDisplayVersion = cleanTextForUI(cleanTextForDisplay(englishStory)),
+                                    russianVersion = "",
+                                    russianDisplayVersion = "",
+                                    selectedWords = availableWords,
+                                    isRussian = false,
+                                    currentSpokenWord = "",
+                                    lastHighlightedSentence = "",
+                                    generationTime = 0.0,
+                                    isSpeaking = false,
+                                    lastSpokenWordIndex = 0
+                                )
+                            }
+                            Log.d(TAG, "Story generation completed with ${lastMissingWords.size} missing words (below threshold)")
+
+                            // Update usage dates only for used words
+                            val usedWordsSet = usedWords.toSet()
+                            wordStorageUseCase.updateWordUsageDates(usedWordsSet.toList())
+
+                            return Triple(englishStory, cleanTextForUI(cleanTextForDisplay(englishStory)), availableWords)
+                        }
                     }
+
+                } catch (e: Exception) {
+                    // Детальное логирование всех ошибок запроса
+                    Log.e(TAG, "Error in attempt $attempt: ${e.javaClass.name}: ${e.message}", e)
+
+                    // Если это последняя попытка, добавляем больше деталей
+                    if (attempt == maxAttempts) {
+                        Log.e(TAG, "Final attempt ($maxAttempts) failed. Request details:")
+                        Log.e(TAG, "- Prompt first 200 chars: ${storyPrompt.take(200)}...")
+                        Log.e(TAG, "- Available words: ${availableWords.joinToString(", ")}")
+                        Log.e(TAG, "- Current device time: ${Date()}")
+                        e.stackTrace.take(5).forEach { element ->
+                            Log.e(TAG, "Stack: $element")
+                        }
+                        throw e
+                    }
+
+                    // Если не последняя попытка, ждем с логированием
+                    Log.w(TAG, "Attempt $attempt failed. Will retry in 2 seconds...")
+                    delay(2000) // Небольшая пауза перед следующей попыткой
                 }
 
                 attempt++
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error generating story", e)
-            updateState { _ -> UiState.Error("Error generating story: ${e.localizedMessage}") }
+            // Полная информация об ошибке включая стек вызовов
+            Log.e(TAG, "Error generating story: ${e.javaClass.name}: ${e.message}", e)
+
+            // Детализируем ошибки API для Google Gemini
+            when {
+                e.message?.contains("RESOURCE_EXHAUSTED") == true -> {
+                    Log.e(TAG, "API quota exceeded. You've reached your limit of requests.", e)
+                    updateState { _ -> UiState.Error("API quota exceeded. You've reached your request limit.") }
+                }
+                e.message?.contains("INVALID_ARGUMENT") == true -> {
+                    Log.e(TAG, "Invalid request parameters sent to Gemini API", e)
+                    updateState { _ -> UiState.Error("Invalid parameters in API request: ${e.message}") }
+                }
+                e.message?.contains("PERMISSION_DENIED") == true -> {
+                    Log.e(TAG, "API key is invalid or does not have required permissions", e)
+                    updateState { _ -> UiState.Error("API key error: Invalid or insufficient permissions") }
+                }
+                e.message?.contains("UNAUTHENTICATED") == true -> {
+                    Log.e(TAG, "Authentication failed - API key may be invalid", e)
+                    updateState { _ -> UiState.Error("API key authentication failed. Please check your API key.") }
+                }
+                e.message?.contains("UNAVAILABLE") == true -> {
+                    Log.e(TAG, "Gemini API service is currently unavailable", e)
+                    updateState { _ -> UiState.Error("Gemini API service is currently unavailable. Please try again later.") }
+                }
+                e.message?.contains("timeout") == true || e.message?.contains("timed out") == true -> {
+                    Log.e(TAG, "Request timed out - network issues or large prompt", e)
+                    updateState { _ -> UiState.Error("Request timed out. Check your internet connection and try again.") }
+                }
+                else -> {
+                    // Общее сообщение об ошибке с максимумом деталей
+                    Log.e(TAG, "Unhandled error generating story", e)
+                    updateState { _ -> UiState.Error("Error generating story: ${e.localizedMessage}") }
+                }
+            }
             return Triple("", "", listOf())
         }
         return Triple("", "", listOf())
@@ -274,6 +401,20 @@ class GenerateStoryUseCase @Inject constructor(
         }
 
         return sentences
+    }
+
+    // Вспомогательная функция для проверки сетевого подключения
+    private fun isNetworkAvailable(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val networkCapabilities = connectivityManager.activeNetwork ?: return false
+            val actNw = connectivityManager.getNetworkCapabilities(networkCapabilities) ?: return false
+            return actNw.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } else {
+            val activeNetworkInfo = connectivityManager.activeNetworkInfo
+            return activeNetworkInfo != null && activeNetworkInfo.isConnected
+        }
     }
 
     private fun updateState(updater: (UiState) -> UiState) {
