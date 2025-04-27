@@ -128,6 +128,9 @@ fun StoryContent(
                                     // Display sentence without separators but with bold words
                                     val cleanSentence = sentence.replace("<<SENTENCE_END>>", "")
 
+                                    // Clean sentence from asterisks for both display and long press handling
+                                    val cleanedSentenceForProcessing = cleanTextFromAsterisks(cleanSentence)
+
                                     // Create annotated string with bold words instead of starred words
                                     val annotatedText = createBoldText(cleanSentence)
 
@@ -153,8 +156,8 @@ fun StoryContent(
                                                         try {
                                                             val layoutResult = textLayoutResult
                                                             if (layoutResult != null) {
-                                                                // Fix function for handling without suspend
-                                                                onWordLongPress(cleanSentence, layoutResult) { handler ->
+                                                                // Use cleaned sentence without asterisks for word detection
+                                                                onWordLongPress(cleanedSentenceForProcessing, layoutResult) { handler ->
                                                                     handler(offset)
                                                                 }
                                                             }
@@ -182,6 +185,9 @@ fun StoryContent(
                         // Create annotated string with bold words
                         val annotatedText = createBoldText(textForDisplay)
 
+                        // Clean text from asterisks for processing
+                        val cleanedTextForProcessing = cleanTextFromAsterisks(textForDisplay)
+
                         Text(
                             text = annotatedText,
                             style = MaterialTheme.typography.bodyLarge,
@@ -201,7 +207,8 @@ fun StoryContent(
                                             try {
                                                 val layoutResult = textLayoutResult
                                                 if (layoutResult != null) {
-                                                    onWordLongPress(textForDisplay, layoutResult) { handler ->
+                                                    // Use cleaned text without asterisks
+                                                    onWordLongPress(cleanedTextForProcessing, layoutResult) { handler ->
                                                         handler(offset)
                                                     }
                                                 }
@@ -308,5 +315,12 @@ private fun createBoldText(text: String): AnnotatedString {
         if (lastEndIndex < text.length) {
             append(text.substring(lastEndIndex))
         }
+    }
+}
+
+// New helper function to remove asterisks from text for processing
+private fun cleanTextFromAsterisks(text: String): String {
+    return text.replace(Regex("""\*([^*]+)\*""")) { matchResult ->
+        matchResult.groupValues[1] // Return only text within asterisks
     }
 }
